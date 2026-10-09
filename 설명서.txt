@@ -1,0 +1,17 @@
+파일 변환기 (Windows)
+
+[실행]
+  FileConverter.exe 더블클릭. 파이썬 설치 필요 없음.
+  처음 실행 때 "Windows의 PC 보호" 창이 뜨면 → "추가 정보" → "실행"
+  (서명 안 된 개인 제작 프로그램이라 뜨는 경고)
+
+[사용법]
+  - 왼쪽에 파일/폴더를 끌어다 놓기 (끌어서 순서 변경, Delete 키로 삭제)
+  - 버튼: 이미지 묶기(PDF/Word/PPT/ZIP), 문서 변환, PDF → 이미지
+  - 말로: "사진 시간순으로 pdf로 묶어줘" 입력 후 엔터
+  - 같은 이름 파일이 있으면 '묶음 (1).pdf'처럼 따로 저장
+
+[선택 설치]
+  - Word/PPT → PDF 변환: LibreOffice 설치 (winget install TheDocumentFoundation.LibreOffice)
+  - AI로 말 알아듣기: Ollama 설치 후 'ollama pull qwen2.5:7b'
+    (없으면 '규칙 모드'로 간단한 문장은 알아들음)

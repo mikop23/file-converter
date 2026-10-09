@@ -1,0 +1,6 @@
+PySide6
+pillow
+python-docx
+python-pptx
+pypdfium2
+pdf2docx
