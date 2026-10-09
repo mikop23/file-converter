@@ -34,10 +34,24 @@ jobs:
           New-Item -ItemType Directory -Force bin | Out-Null
           Get-ChildItem pandoc_tmp -Recurse -Filter pandoc.exe | Select-Object -First 1 | Copy-Item -Destination bin\pandoc.exe
 
+      - name: AI 엔진 포함 (llama.cpp)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download -R ggml-org/llama.cpp --pattern "*bin-win-cpu-x64.zip" -O llama.zip
+          if (!(Test-Path llama.zip)) { gh release download -R ggml-org/llama.cpp --pattern "*bin-win-avx2-x64.zip" -O llama.zip }
+          Expand-Archive llama.zip -DestinationPath llama_tmp
+          $srv = Get-ChildItem llama_tmp -Recurse -Filter llama-server.exe | Select-Object -First 1
+          New-Item -ItemType Directory -Force bin\llama | Out-Null
+          Copy-Item "$($srv.DirectoryName)\*.dll" bin\llama\
+          Copy-Item $srv.FullName bin\llama\
+
       - name: exe 만들기
         run: >
           pyinstaller --noconfirm --windowed --name FileConverter
           --add-binary "bin\pandoc.exe;bin"
+          --add-data "bin\llama;bin\llama"
           app.py
 
       - name: 실행 테스트 (부품 다 들어갔는지)
@@ -47,6 +61,25 @@ jobs:
           python -c "import app, fconv, fai, docx, pptx, pypdfium2, pdf2docx; print('imports ok')"
           if (!(Test-Path dist\FileConverter\FileConverter.exe)) { exit 1 }
           if (!(Test-Path dist\FileConverter\_internal\bin\pandoc.exe)) { exit 1 }
+          if (!(Test-Path dist\FileConverter\_internal\bin\llama\llama-server.exe)) { exit 1 }
+
+      - name: AI 모델 캐시
+        uses: actions/cache@v4
+        with:
+          path: model
+          key: qwen2.5-1.5b-q4km
+
+      - name: 진짜 AI로 말 알아듣기 테스트
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force model | Out-Null
+          if (!(Test-Path model\m.gguf)) { curl.exe -L -o model\m.gguf https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf }
+          $p = Start-Process bin\llama\llama-server.exe -ArgumentList "-m model\m.gguf --port 18080 -c 4096" -PassThru -WindowStyle Hidden
+          for ($i = 0; $i -lt 60; $i++) { try { Invoke-WebRequest http://127.0.0.1:18080/health -UseBasicParsing | Out-Null; break } catch { Start-Sleep 2 } }
+          $env:PYTHONIOENCODING = "utf-8"
+          python tests\ai_test.py
+          Stop-Process $p
 
       - name: 압축
         shell: pwsh

@@ -40,7 +40,13 @@ SYSTEM = """너는 파일 변환 도우미다. 사용자 요청을 아래 JSON �
 - "사진/이미지 전부" → 이미지 확장자 와일드카드. "찍은 순/시간순" → sort "time".
 - "용량 줄여/작게" → quality 60, max_size 1500. "고화질/원본" → quality 95, max_size 0.
 - "한 페이지에 N장" → per_page N.
-- 출력 파일명을 말 안 하면 적당한 한국어 이름을 짓는다."""
+- 출력 파일명을 말 안 하면 적당한 한국어 이름을 짓는다.
+
+예시)
+요청: 사진들 찍은 순서대로 피디에프로 합쳐줘
+{"action":"bundle","files":["*.jpg","*.png"],"out":"사진모음.pdf","sort":"time","quality":80,"max_size":2000,"per_page":1}
+요청: 보고서.docx pdf로 바꿔
+{"action":"convert","files":["보고서.docx"],"target":"pdf"}"""
 
 IMG_GLOBS = ["*.jpg", "*.jpeg", "*.png", "*.webp", "*.heic", "*.JPG", "*.JPEG", "*.PNG"]
 
@@ -55,18 +61,16 @@ def list_models():
     except Exception:
         return None
 
-def make_plan(text, files, model=None):
-    """요청 → (검사된 계획, 'AI'|'규칙'). 실패 시 ValueError"""
+def make_plan(text, files, model=None, api=None):
+    """요청 → (검사된 계획, 'AI'|'규칙'). AI가 틀리면 규칙으로 한 번 더. 둘 다 실패 시 ValueError"""
     if model:
         try:
-            plan, who = ask_ai(text, files, model), "AI"
+            return check(ask_ai(text, files, model, api), files), "AI"
         except Exception:
-            plan, who = ask_rules(text, files), "규칙"
-    else:
-        plan, who = ask_rules(text, files), "규칙"
-    return check(plan, files), who
+            pass
+    return check(ask_rules(text, files), files), "규칙"
 
-def ask_ai(text, files, model=None):
+def ask_ai(text, files, model=None, api=None):
     listing = "\n".join(files[:200]) or "(비어 있음)"
     body = {
         "model": model or MODEL, "temperature": 0,
@@ -76,7 +80,7 @@ def ask_ai(text, files, model=None):
             {"role": "user", "content": f"폴더 파일 목록:\n{listing}\n\n요청: {text}"},
         ],
     }
-    req = urllib.request.Request(API, json.dumps(body).encode(),
+    req = urllib.request.Request(api or API, json.dumps(body).encode(),
                                  {"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=120) as r:
         content = json.load(r)["choices"][0]["message"]["content"]

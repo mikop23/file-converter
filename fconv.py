@@ -61,6 +61,66 @@ def unique_path(p):
 
 NO_WINDOW = {"creationflags": 0x08000000} if os.name == "nt" else {}  # 윈도우에서 검은 창 안 뜨게
 
+WORD_EXT, PPT_EXT, XL_EXT = {"docx", "doc", "odt", "rtf"}, {"pptx", "ppt", "odp"}, {"xlsx", "xls", "ods"}
+OFFICE_EXT = WORD_EXT | PPT_EXT | XL_EXT | {"hwp"}
+
+
+def ms_office_to_pdf(src, out):
+    """PC에 깔린 MS 오피스(Word/PowerPoint/Excel)로 PDF 저장. 성공하면 True"""
+    if os.name != "nt":
+        return False
+    try:
+        import pythoncom, win32com.client
+    except ImportError:
+        return False
+    s = src.suffix.lower().lstrip(".")
+    src, out = str(Path(src).resolve()), str(Path(out).resolve())
+    pythoncom.CoInitialize()                         # 백그라운드 스레드에서 필요
+    app = None
+    try:
+        if s in WORD_EXT:
+            app = win32com.client.DispatchEx("Word.Application")
+            app.Visible = False
+            app.DisplayAlerts = 0
+            doc = app.Documents.Open(src, ReadOnly=True, AddToRecentFiles=False)
+            doc.ExportAsFixedFormat(out, 17)         # 17 = PDF
+            doc.Close(False)
+        elif s in PPT_EXT:
+            app = win32com.client.DispatchEx("PowerPoint.Application")
+            pres = app.Presentations.Open(src, ReadOnly=True, Untitled=False, WithWindow=False)
+            pres.SaveAs(out, 32)                     # 32 = PDF
+            pres.Close()
+        elif s in XL_EXT:
+            app = win32com.client.DispatchEx("Excel.Application")
+            app.Visible = False
+            app.DisplayAlerts = False
+            wb = app.Workbooks.Open(src, ReadOnly=True)
+            wb.ExportAsFixedFormat(0, out)           # 0 = PDF
+            wb.Close(False)
+        else:
+            return False
+        return Path(out).is_file()
+    except Exception:
+        return False                                 # 오피스 없음/실패 → LibreOffice로 넘어감
+    finally:
+        try:
+            if app is not None:
+                app.Quit()
+        except Exception:
+            pass
+        pythoncom.CoUninitialize()
+
+
+def install_libreoffice():
+    """윈도우 기본 설치도구(winget)로 LibreOffice 자동 설치. 성공하면 True"""
+    winget = shutil.which("winget")
+    if not winget:
+        return False
+    r = subprocess.run([winget, "install", "-e", "--id", "TheDocumentFoundation.LibreOffice",
+                        "--silent", "--accept-package-agreements", "--accept-source-agreements"],
+                       capture_output=True, **NO_WINDOW)
+    return find_office() is not None
+
 
 # ───────── 공통 이미지 처리 (덤 기능) ─────────
 def natural_key(p):
@@ -122,10 +182,13 @@ def convert(src, target, out=None):
         except ImportError:
             sys.exit("PDF→Word는 pip install pdf2docx 필요")
         cv = Converter(str(src)); cv.convert(str(out)); cv.close()
-    elif target == "pdf" and s in {"docx", "doc", "pptx", "ppt", "xlsx", "xls", "odt", "hwp"}:
-        office = find_office()
+    elif target == "pdf" and s in OFFICE_EXT:
+        if ms_office_to_pdf(src, out):               # 1순위: MS 오피스 (모양 제일 정확)
+            print(f"완료: {out}")
+            return out
+        office = find_office()                       # 2순위: LibreOffice
         if not office:
-            sys.exit("Office→PDF는 LibreOffice 설치 필요")
+            sys.exit("NEED_OFFICE: Word·PPT → PDF는 MS 오피스나 LibreOffice가 필요해요")
         with tempfile.TemporaryDirectory() as td:           # 임시 폴더에서 만들고 옮김
             subprocess.run([office, "--headless", "--convert-to", "pdf", "--outdir", td, str(src)],
                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **NO_WINDOW)

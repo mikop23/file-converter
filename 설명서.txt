@@ -11,7 +11,11 @@
   - 말로: "사진 시간순으로 pdf로 묶어줘" 입력 후 엔터
   - 같은 이름 파일이 있으면 '묶음 (1).pdf'처럼 따로 저장
 
-[선택 설치]
-  - Word/PPT → PDF 변환: LibreOffice 설치 (winget install TheDocumentFoundation.LibreOffice)
-  - AI로 말 알아듣기: Ollama 설치 후 'ollama pull qwen2.5:7b'
-    (없으면 '규칙 모드'로 간단한 문장은 알아들음)
+[Word·PPT·엑셀 → PDF]
+  - PC에 MS 오피스가 있으면 그걸로 바로 변환 (따로 설치 필요 없음)
+  - 오피스가 없으면 변환할 때 'LibreOffice 자동 설치'를 물어봄 → '예' 누르면 끝
+
+[AI로 말 알아듣기]
+  - 오른쪽 위 'AI 받기' 버튼 → 약 1.1GB 한 번만 받으면 끝
+  - 받은 뒤엔 인터넷 없이 이 PC 안에서만 돌아감
+  - Ollama를 이미 쓰고 있으면 그걸 우선 사용 (더 큰 모델 가능)

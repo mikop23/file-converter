@@ -1,6 +1,7 @@
-PySide6
+PySide6-Essentials
 pillow
 python-docx
 python-pptx
 pypdfium2
 pdf2docx
+pywin32; sys_platform == "win32"

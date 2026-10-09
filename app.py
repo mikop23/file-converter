@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import fconv, fai
+import fconv, fai, localai
 
 DOC_EXT = {".md", ".docx", ".doc", ".html", ".htm", ".txt", ".odt", ".epub", ".rtf",
            ".pptx", ".ppt", ".xlsx", ".xls", ".pdf", ".hwp", ".rst", ".tex"}
@@ -58,14 +58,15 @@ QProgressBar::chunk { background: #2563eb; border-radius: 3px; }
 class Worker(QObject):
     done = Signal(object)
     failed = Signal(str)
+    progress = Signal(float, float)
 
-    def __init__(self, fn):
+    def __init__(self, fn, with_progress=False):
         super().__init__()
-        self.fn = fn
+        self.fn, self.with_progress = fn, with_progress
 
     def run(self):
         try:
-            self.done.emit(self.fn())
+            self.done.emit(self.fn(self.progress.emit) if self.with_progress else self.fn())
         except (SystemExit, ValueError) as e:   # fconv·fai가 내는 친절한 오류
             self.failed.emit(str(e))
         except Exception as e:
@@ -75,9 +76,14 @@ class Worker(QObject):
 
 class Job(QObject):
     """메인 스레드에 사는 받는 쪽 → 결과 처리가 항상 화면 스레드에서 실행됨"""
-    def __init__(self, parent, on_done, on_fail):
+    def __init__(self, parent, on_done, on_fail, on_progress=None):
         super().__init__(parent)
-        self.on_done, self.on_fail = on_done, on_fail
+        self.on_done, self.on_fail, self.on_progress = on_done, on_fail, on_progress
+
+    @Slot(float, float)
+    def progress(self, a, b):
+        if self.on_progress:
+            self.on_progress(a, b)
 
     @Slot(object)
     def done(self, r):
@@ -176,6 +182,8 @@ class Main(QMainWindow):
         self.out_dir = None          # None이면 첫 파일 폴더
         self.last_out = None
         self.jobs = []
+        self.ai_mode = None
+        self.server = localai.Server()
         self.models = None
 
         root = QWidget(objectName="root")
@@ -196,7 +204,11 @@ class Main(QMainWindow):
         refresh.setFixedWidth(34)
         refresh.setToolTip("AI 연결 다시 확인")
         refresh.clicked.connect(self.check_ai)
+        self.get_ai_btn = QPushButton(f"AI 받기 ({localai.MODEL_SIZE_MB / 1000:.1f}GB)")
+        self.get_ai_btn.setVisible(False)
+        self.get_ai_btn.clicked.connect(self.get_ai)
         top.addWidget(self.ai_chip)
+        top.addWidget(self.get_ai_btn)
         top.addWidget(self.model_box)
         top.addWidget(refresh)
         outer.addLayout(top)
@@ -329,20 +341,43 @@ class Main(QMainWindow):
         else:
             self.on_files_changed()
 
-    def background(self, fn, on_done, text):
-        self.busy(True, text)
-        th, wk = QThread(self), Worker(fn)
-        job = Job(self, lambda r: (self.busy(False), on_done(r)),
-                  lambda m: (self.busy(False), self.status("✗ " + m, "err")))
+    def background(self, fn, on_done, text, on_fail=None, block=True, on_progress=None):
+        """fn을 백그라운드에서 실행. block=False면 다른 작업 버튼을 막지 않음"""
+        if block:
+            self.busy(True, text)
+        unblock = (lambda: self.busy(False)) if block else (lambda: None)
+        th, wk = QThread(self), Worker(fn, on_progress is not None)
+        job = Job(self, lambda r: (unblock(), on_done(r)),
+                  lambda m: (unblock(), (on_fail or self.fail)(m)), on_progress)
         wk.moveToThread(th)
         th.started.connect(wk.run)
         wk.done.connect(job.done)
         wk.failed.connect(job.failed)
+        wk.progress.connect(job.progress)
         wk.done.connect(th.quit); wk.failed.connect(th.quit)
         th.finished.connect(lambda: (self.jobs.remove(rec), job.deleteLater(), th.deleteLater()))
         rec = (th, wk, job)
         self.jobs.append(rec)                      # 참조 유지 (중간에 사라지면 크래시)
         th.start()
+
+    def fail(self, m):
+        if "NEED_OFFICE" in m:
+            return self.offer_office()
+        self.status("✗ " + m, "err")
+
+    def offer_office(self):
+        msg = ("Word·PPT·엑셀을 PDF로 바꾸려면 MS 오피스나 LibreOffice(무료)가 필요한데,\n"
+               "이 PC에서 둘 다 못 찾았어요.\n\n"
+               "LibreOffice를 자동으로 설치할까요? (약 350MB, 몇 분 걸려요)")
+        if QMessageBox.question(self, "LibreOffice 설치", msg) != QMessageBox.Yes:
+            return self.status("Word·PPT → PDF는 MS 오피스나 LibreOffice가 있어야 해요.", "err")
+
+        def ok(r):
+            if r:
+                self.status("✓ LibreOffice 설치 완료! '변환'을 다시 눌러주세요.", "ok")
+            else:
+                self.status("✗ 자동 설치 실패. libreoffice.org에서 직접 설치해주세요.", "err")
+        self.background(fconv.install_libreoffice, ok, "LibreOffice 설치 중… (몇 분 걸려요, 창을 닫지 마세요)")
 
     def out_folder(self, paths):
         return Path(self.out_dir) if self.out_dir else Path(paths[0]).parent
@@ -428,6 +463,8 @@ class Main(QMainWindow):
             outs, errs = r
             self.done_msg(outs[-1], f" 외 {len(outs) - 1}개" if len(outs) > 1 else "")
             if errs:
+                if any("NEED_OFFICE" in e for e in errs):
+                    return self.offer_office()
                 self.status(self.log.text() + f"   ·  실패 {len(errs)}개: {errs[0]}", "err")
         self.background(job, ok, f"{len(srcs)}개 파일을 {tgt}로 변환 중…")
 
@@ -450,7 +487,12 @@ class Main(QMainWindow):
             return
         by_name = {Path(p).name: p for p in paths}
         names = list(by_name)
-        model = self.model_box.currentText() if self.models else None
+        if self.ai_mode == "ollama":
+            model, api = self.model_box.currentText(), None
+        elif self.ai_mode == "builtin":
+            model, api = "local", localai.API
+        else:
+            model, api = None, None
 
         def got_plan(r):
             plan, who = r
@@ -464,7 +506,7 @@ class Main(QMainWindow):
                 return self.status("취소했어요.")
             self.exec_plan(plan, plan_paths)
 
-        self.background(lambda: fai.make_plan(text, names, model), got_plan,
+        self.background(lambda: fai.make_plan(text, names, model, api), got_plan,
                         "AI가 요청을 해석하는 중…" if model else "요청 해석 중…")
 
     def exec_plan(self, plan, paths):
@@ -486,10 +528,18 @@ class Main(QMainWindow):
                                      for p in paths][-1],
                             lambda r: self.done_msg(r, " (폴더)"), "쪼개는 중…")
 
-    # ── AI 연결 ──
+    # ── AI 연결: Ollama(있으면) → 내장 AI → 규칙 모드 ──
+    def set_chip(self, text, on, tip=""):
+        self.ai_chip.setText(text)
+        self.ai_chip.setToolTip(tip)
+        self.ai_chip.setStyleSheet("background:#dcfce7; color:#166534;" if on
+                                   else "background:#f3f4f6; color:#4b5563;")
+
     def check_ai(self):
         self.models = fai.list_models()
+        self.get_ai_btn.setVisible(False)
         if self.models:
+            self.ai_mode = "ollama"
             cur = self.model_box.currentText()
             self.model_box.clear()
             self.model_box.addItems(self.models)
@@ -497,14 +547,60 @@ class Main(QMainWindow):
                 (m for m in self.models if "qwen" in m and "7b" in m), self.models[0])
             self.model_box.setCurrentText(pick)
             self.model_box.setVisible(True)
-            self.ai_chip.setText("● AI 연결됨")
-            self.ai_chip.setStyleSheet("background:#dcfce7; color:#166534;")
-        else:
-            self.model_box.setVisible(False)
-            msg = "○ 규칙 모드" if self.models is None else "○ 모델 없음"
-            self.ai_chip.setText(msg)
-            self.ai_chip.setToolTip("Ollama가 꺼져 있거나 모델이 없어요. 간단한 요청은 규칙으로 처리해요.")
-            self.ai_chip.setStyleSheet("background:#f3f4f6; color:#4b5563;")
+            return self.set_chip("● AI 연결됨 (Ollama)", True)
+        self.model_box.setVisible(False)
+        self.ai_mode = None
+        if not localai.available():
+            return self.set_chip("○ 규칙 모드", False, "간단한 요청은 키워드로 알아들어요.")
+        if not localai.has_model():
+            self.get_ai_btn.setVisible(True)
+            return self.set_chip("○ 규칙 모드", False, "'AI 받기'를 누르면 더 똑똑하게 알아들어요.")
+        self.start_builtin()
+
+    def start_builtin(self):
+        if self.server.running():
+            self.ai_mode = "builtin"
+            return self.set_chip("● 내장 AI", True)
+        if getattr(self, "starting", False):
+            return
+        self.starting = True
+        self.set_chip("◐ AI 켜는 중…", False)
+
+        def ok(r):
+            self.starting = False
+            if r:
+                self.ai_mode = "builtin"
+                self.set_chip("● 내장 AI", True, "Qwen2.5 1.5B · 인터넷 없이 이 PC에서 돌아가요")
+            else:
+                self.set_chip("○ 규칙 모드", False, "내장 AI를 못 켰어요. ↻로 다시 시도")
+        self.background(self.server.start, ok, "", block=False,
+                        on_fail=lambda m: (setattr(self, "starting", False), self.set_chip("○ 규칙 모드", False, m)))
+
+    def get_ai(self):
+        msg = (f"말로 시키기를 더 잘 알아듣는 AI를 받을게요.\n\n"
+               f"• 크기: 약 {localai.MODEL_SIZE_MB / 1000:.1f}GB (처음 한 번만)\n"
+               f"• 받은 뒤에는 인터넷 없이 이 PC 안에서만 돌아가요\n\n받을까요?")
+        if QMessageBox.question(self, "AI 받기", msg) != QMessageBox.Yes:
+            return
+        self.get_ai_btn.setEnabled(False)
+
+        def prog(got, total):
+            self.get_ai_btn.setText(f"받는 중 {min(99, int(got / total * 100))}%")
+
+        def ok(_):
+            self.get_ai_btn.setVisible(False)
+            self.get_ai_btn.setEnabled(True)
+            self.start_builtin()
+
+        def bad(m):
+            self.get_ai_btn.setText("AI 받기 (다시)")
+            self.get_ai_btn.setEnabled(True)
+            self.status("✗ AI 다운로드 실패: " + m, "err")
+        self.background(localai.download_model, ok, "", on_fail=bad, block=False, on_progress=prog)
+
+    def closeEvent(self, e):
+        self.server.stop()
+        super().closeEvent(e)
 
 
 def main():
