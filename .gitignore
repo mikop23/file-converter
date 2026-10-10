@@ -5,3 +5,5 @@ dist/
 bin/
 edition.json
 node_modules/
+site/vendor/
+site/node_modules/

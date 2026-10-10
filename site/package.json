@@ -1,0 +1,20 @@
+{
+  "name": "file-converter-site",
+  "private": true,
+  "description": "사이트에 같이 올릴 라이브러리 목록 (npm ci 후 vendor/로 복사)",
+  "scripts": {
+    "vendor": "node vendor.mjs"
+  },
+  "dependencies": {
+    "docx": "8.5.0",
+    "exifr": "7.1.3",
+    "jspdf": "2.5.2",
+    "jszip": "3.10.1",
+    "mammoth": "1.8.0",
+    "marked": "12.0.2",
+    "pdfjs-dist": "4.10.38",
+    "pptxgenjs": "3.12.0",
+    "turndown": "7.2.0",
+    "turndown-plugin-gfm": "1.0.2"
+  }
+}

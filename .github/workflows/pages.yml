@@ -1,0 +1,51 @@
+name: 사이트 배포 (GitHub Pages)
+
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: 라이브러리 준비
+        working-directory: site
+        run: |
+          npm ci --no-audit --no-fund
+          node vendor.mjs
+      - name: AI 서버 주소 넣기
+        working-directory: site
+        env:
+          RELAY_URL: ${{ vars.RELAY_URL }}
+        run: |
+          printf 'window.FCONV_CONFIG = { relayUrl: %s };\n' "$(node -e 'console.log(JSON.stringify(process.env.RELAY_URL || ""))')" > config.js
+          cat config.js
+      - name: 올릴 파일만 모으기
+        run: |
+          mkdir -p _site
+          cp site/index.html site/app.js site/planner.js site/config.js _site/
+          cp -r site/vendor _site/vendor
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4

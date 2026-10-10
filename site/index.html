@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>파일 변환기</title>
+<meta name="description" content="사진 묶기, 문서 변환, PDF 쪼개기를 브라우저 안에서. 파일은 서버로 올라가지 않아요.">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+/* 레이아웃: 왼쪽 파일 트레이(넓게) + 오른쪽 작업 패널(고정폭), 폰에서는 위아래로 */
+:root {
+  --bg: #f3f5f8;
+  --surface: #ffffff;
+  --line: #dde2ea;
+  --line-strong: #c4ccd8;
+  --fg: #1b2230;
+  --muted: #667085;
+  --accent: #2456e6;
+  --accent-soft: #e7eeff;
+  --ok: #157f3d;
+  --ok-soft: #dcf5e4;
+  --err: #b42318;
+  --err-soft: #fde7e5;
+  --font: "Pretendard Variable", Pretendard, "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11151c; --surface: #191e27; --line: #2a313d; --line-strong: #3a4352;
+    --fg: #e6e9ef; --muted: #98a2b3; --accent: #7a9dff; --accent-soft: #1d2a4d;
+    --ok: #5fd08a; --ok-soft: #12321f; --err: #ff8a7a; --err-soft: #3a1714; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11151c; --surface: #191e27; --line: #2a313d; --line-strong: #3a4352;
+  --fg: #e6e9ef; --muted: #98a2b3; --accent: #7a9dff; --accent-soft: #1d2a4d;
+  --ok: #5fd08a; --ok-soft: #12321f; --err: #ff8a7a; --err-soft: #3a1714; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--font); -webkit-font-smoothing: antialiased; }
+button, input, select { font: inherit; color: inherit; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 16px; padding-block: 18px 40px; display: grid; gap: 14px; }
+
+header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+header h1 { font-size: 20px; font-weight: 750; letter-spacing: -0.02em; margin: 0; margin-right: auto; }
+header h1 small { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 8px; letter-spacing: 0; }
+.chip { font-size: 12.5px; padding: 4px 10px; border-radius: 99px; background: var(--line); color: var(--muted); white-space: nowrap; }
+.chip.on { background: var(--ok-soft); color: var(--ok); }
+
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 14px; align-items: start; }
+@media (max-width: 860px) { .main { grid-template-columns: minmax(0, 1fr); } }
+
+/* 파일 트레이 */
+.tray { display: grid; gap: 10px; min-width: 0; }
+#drop { position: relative; min-height: 360px; background: var(--surface); border: 2px dashed var(--line-strong); border-radius: var(--r); padding: 8px; transition: border-color .15s, background .15s; }
+#drop.has { border-style: solid; border-width: 1px; border-color: var(--line); }
+#drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.empty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 6px; color: var(--muted); padding: 16px; }
+.empty b { color: var(--fg); font-size: 16px; font-weight: 650; }
+.empty .types { font-family: var(--mono); font-size: 12px; letter-spacing: .02em; }
+#list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+#list li { display: grid; grid-template-columns: 22px 46px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 7px; cursor: grab; }
+#list li:hover { background: var(--bg); }
+#list li.dragging { opacity: .4; }
+#list li.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.idx { font: 12px var(--mono); color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.thumb { width: 46px; height: 46px; border-radius: 6px; object-fit: cover; background: var(--bg); display: grid; place-items: center; font: 600 10.5px var(--mono); color: var(--muted); text-transform: uppercase; border: 1px solid var(--line); }
+.fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fsize { font: 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.rm { border: 0; background: none; color: var(--muted); width: 28px; height: 28px; border-radius: 6px; cursor: pointer; font-size: 18px; line-height: 1; }
+.rm:hover { background: var(--err-soft); color: var(--err); }
+.trayrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.trayrow .count { margin-left: auto; color: var(--muted); font-size: 13px; }
+
+/* 작업 패널 */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 18px; min-width: 0; }
+.sec { display: grid; gap: 8px; }
+.sec h2 { margin: 0; font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: .06em; }
+.sec h2 .tag { font-weight: 600; letter-spacing: 0; color: var(--accent); margin-left: 4px; }
+.row { display: flex; gap: 6px; }
+.row > :first-child { flex: 1; min-width: 0; }
+.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.opts { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; font-size: 14px; }
+.btn, select, input[type=text], input[type=url] { height: 38px; border: 1px solid var(--line-strong); background: var(--surface); border-radius: 8px; padding: 0 12px; min-width: 0; }
+.btn { cursor: pointer; font-weight: 600; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; }
+.btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover:not(:disabled) { color: #fff; filter: brightness(1.08); }
+.btn.ghost { border-color: transparent; background: none; font-weight: 500; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.note { font-size: 12.5px; color: var(--muted); margin: 0; }
+
+/* 상태 + 결과 */
+.status { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; display: grid; gap: 10px; }
+#msg { margin: 0; min-height: 1.5em; }
+#msg.ok { color: var(--ok); } #msg.err { color: var(--err); }
+.bar { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 30%; background: var(--accent); border-radius: 2px; animation: slide 1.1s ease-in-out infinite; }
+.bar.det i { animation: none; transition: width .2s; }
+@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+@media (prefers-reduced-motion: reduce) { .bar i { animation: none; width: 100%; opacity: .5; } }
+#results { display: flex; flex-wrap: wrap; gap: 6px; }
+#results a { display: inline-flex; gap: 8px; align-items: center; padding: 6px 10px; border-radius: 8px; background: var(--ok-soft); color: var(--ok); text-decoration: none; font-weight: 600; font-size: 13.5px; max-width: 100%; }
+#results a span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#results a small { font: 12px var(--mono); opacity: .8; }
+
+/* 확인 창 */
+dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--fg); padding: 20px; width: min(440px, calc(100vw - 32px)); }
+dialog::backdrop { background: rgb(10 14 20 / .45); }
+dialog h3 { margin: 0 0 8px; font-size: 16px; }
+dialog p { margin: 0 0 16px; white-space: pre-line; color: var(--fg); }
+dialog .who { font: 12px var(--mono); color: var(--accent); }
+dialog .acts { display: flex; justify-content: flex-end; gap: 8px; }
+dialog input { width: 100%; margin-bottom: 16px; }
+footer { color: var(--muted); font-size: 12.5px; text-align: center; }
+footer a { color: inherit; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>파일 변환기<small>브라우저 안에서 처리 · 파일은 서버로 안 올라가요</small></h1>
+    <span id="aiChip" class="chip">규칙 모드</span>
+    <button id="serverBtn" class="btn ghost" type="button">AI 서버</button>
+  </header>
+
+  <div class="main">
+    <section class="tray" aria-label="파일 목록">
+      <div id="drop">
+        <div class="empty" id="empty">
+          <b>여기에 파일을 끌어다 놓으세요</b>
+          <span>또는 아래 '파일 추가'를 눌러 고르기</span>
+          <span class="types">jpg · png · webp · pdf · md · html · txt · docx</span>
+        </div>
+        <ol id="list"></ol>
+      </div>
+      <div class="trayrow">
+        <label class="btn" for="pick">+ 파일 추가</label>
+        <input id="pick" type="file" multiple hidden accept="image/*,.pdf,.md,.markdown,.html,.htm,.txt,.docx">
+        <button id="clear" class="btn ghost" type="button">비우기</button>
+        <span id="count" class="count"></span>
+      </div>
+    </section>
+
+    <aside class="panel" aria-label="작업">
+      <div class="sec">
+        <h2>말로 시키기</h2>
+        <form class="row" id="askForm">
+          <input id="ask" type="text" placeholder="예: 사진 시간순으로 PDF로 묶어줘" autocomplete="off">
+          <button class="btn primary" id="askBtn" type="submit">실행</button>
+        </form>
+      </div>
+
+      <div class="sec">
+        <h2>이미지 묶기</h2>
+        <div class="grid4">
+          <button class="btn" data-bundle="pdf" type="button">PDF</button>
+          <button class="btn" data-bundle="docx" type="button">Word</button>
+          <button class="btn" data-bundle="pptx" type="button">PPT</button>
+          <button class="btn" data-bundle="zip" type="button">ZIP</button>
+        </div>
+      </div>
+
+      <div class="sec">
+        <h2>문서 변환 · PDF 쪼개기</h2>
+        <div class="row">
+          <select id="target" aria-label="바꿀 형식">
+            <option value="docx">docx (Word)</option>
+            <option value="md">md (마크다운)</option>
+            <option value="html">html</option>
+            <option value="txt">txt</option>
+          </select>
+          <button class="btn" id="convBtn" type="button">변환</button>
+          <button class="btn" id="splitBtn" type="button">PDF → 이미지</button>
+        </div>
+      </div>
+
+      <div class="sec" id="ocrSec">
+        <h2>글자 추출<span class="tag">온라인 AI</span></h2>
+        <div class="row">
+          <select id="ocrTarget" aria-label="글자 추출 결과 형식">
+            <option value="docx">Word (docx)</option>
+            <option value="txt">텍스트 (txt)</option>
+            <option value="md">마크다운 (md)</option>
+          </select>
+          <button class="btn" id="ocrBtn" type="button">글자 뽑기</button>
+        </div>
+        <p class="note" id="ocrNote">사진·스캔 PDF를 AI 서버로 보내서 읽어요.</p>
+      </div>
+
+      <div class="sec">
+        <h2>옵션</h2>
+        <div class="opts">
+          <label for="sort">순서</label>
+          <select id="sort"><option value="none">목록 순서</option><option value="name">파일명순</option><option value="time">찍은 시간순</option></select>
+          <label for="quality">화질</label>
+          <select id="quality"><option value="normal">보통</option><option value="small">용량 작게</option><option value="hq">고화질</option></select>
+          <label for="perPage">Word 한 쪽에</label>
+          <select id="perPage"><option>1</option><option>2</option><option>3</option><option>4</option><option>6</option></select>
+          <label for="outName">결과 이름</label>
+          <input id="outName" type="text" value="묶음">
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <section class="status" aria-live="polite">
+    <p id="msg">파일을 넣고 작업을 골라주세요.</p>
+    <div class="bar" id="bar" hidden><i></i></div>
+    <div id="results"></div>
+  </section>
+
+  <footer>Word·PPT → PDF, PDF → Word는 <a href="https://github.com/mikop23/file-converter">PC 프로그램</a>에서 할 수 있어요.</footer>
+</div>
+
+<dialog id="confirmDlg">
+  <form method="dialog">
+    <h3 id="cfTitle">작업 확인</h3>
+    <p id="cfBody"></p>
+    <div class="acts"><button class="btn" value="no">취소</button><button class="btn primary" value="yes">진행</button></div>
+  </form>
+</dialog>
+
+<dialog id="serverDlg">
+  <form method="dialog">
+    <h3>AI 서버 주소</h3>
+    <p class="note">말 알아듣기와 글자 추출에 쓰는 중계 서버예요. 비워두면 규칙 모드로 동작해요.</p>
+    <input id="serverUrl" type="url" placeholder="https://file-converter-relay.….workers.dev">
+    <div class="acts"><button class="btn" value="no">취소</button><button class="btn primary" value="yes">저장</button></div>
+  </form>
+</dialog>
+
+<script src="config.js"></script>
+<script src="vendor/jszip.min.js"></script>
+<script src="vendor/jspdf.umd.min.js"></script>
+<script src="vendor/pptxgen.bundle.js"></script>
+<script src="vendor/docx.umd.js"></script>
+<script src="vendor/marked.min.js"></script>
+<script src="vendor/turndown.js"></script>
+<script src="vendor/turndown-plugin-gfm.js"></script>
+<script src="vendor/mammoth.browser.min.js"></script>
+<script src="vendor/exifr.lite.umd.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
