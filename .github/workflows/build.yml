@@ -39,14 +39,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $assets = (gh release view -R ggml-org/llama.cpp --json assets | ConvertFrom-Json).assets.name
-          $win = $assets | Where-Object { $_ -match 'win' -and $_ -match 'x64' -and $_ -match '\.zip$' -and $_ -notmatch 'cuda|cudart|vulkan|hip|sycl|opencl|arm|kompute' }
-          $pick = ($win | Where-Object { $_ -match 'cpu' } | Select-Object -First 1)
-          if (!$pick) { $pick = ($win | Where-Object { $_ -match 'avx2' } | Select-Object -First 1) }
-          if (!$pick) { $pick = $win | Select-Object -First 1 }
-          if (!$pick) { Write-Host "::error::llama.cpp 윈도우 파일 못 찾음. 목록: $($assets -join ', ')"; exit 1 }
-          Write-Host "::notice::llama.cpp 사용 파일: $pick"
-          gh release download -R ggml-org/llama.cpp --pattern $pick -O llama.zip
+          $releases = gh api "repos/ggml-org/llama.cpp/releases?per_page=30" | ConvertFrom-Json
+          $pick = $null; $tag = $null
+          foreach ($r in $releases) {
+            $win = $r.assets.name | Where-Object { $_ -match 'win' -and $_ -match 'x64' -and $_ -match '\.zip$' -and $_ -notmatch 'cuda|cudart|vulkan|hip|sycl|opencl|arm|kompute' }
+            $c = ($win | Where-Object { $_ -match 'cpu' } | Select-Object -First 1)
+            if (!$c) { $c = ($win | Where-Object { $_ -match 'avx2' } | Select-Object -First 1) }
+            if ($c) { $pick = $c; $tag = $r.tag_name; break }
+          }
+          if (!$pick) { Write-Host "::error::llama.cpp 윈도우 파일 못 찾음 (최근 릴리스: $(($releases | Select-Object -First 3).tag_name -join ', '))"; exit 1 }
+          Write-Host "::notice::llama.cpp 사용 파일: $tag / $pick"
+          gh release download $tag -R ggml-org/llama.cpp --pattern $pick -O llama.zip
           Expand-Archive llama.zip -DestinationPath llama_tmp
           $srv = Get-ChildItem llama_tmp -Recurse -Filter llama-server.exe | Select-Object -First 1
           if (!$srv) { Write-Host "::error::$pick 안에 llama-server.exe 없음"; exit 1 }
