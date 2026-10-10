@@ -14,14 +14,24 @@ cases = [
     ("발표자료 pdf로", "convert", lambda p: p["target"] == "pdf" and p["files"] == ["발표자료.pptx"]),
     ("메모.md 워드 파일로 변환", "convert", lambda p: p["target"] == "docx"),
     ("스캔본 페이지별로 이미지로 쪼개줘", "split", lambda p: p["files"] == ["스캔본.pdf"]),
+    ("사진 다 합쳐서 하나의 파일로", "bundle", lambda p: len(p["files"]) == 4),
+    ("IMG_0001이랑 IMG_0002만 pdf로 묶어", "bundle", lambda p: p["files"] == ["IMG_0001.jpg", "IMG_0002.jpg"]),
+    ("스캔본.pdf를 워드로", "convert", lambda p: p["target"] == "docx" and p["files"] == ["스캔본.pdf"]),
+    ("오늘 날씨 어때", "unknown", lambda p: True),
 ]
 ok = 0
 for text, act, test in cases:
     t0 = time.time()
     try:
         raw = fai.ask_ai(text, files, "local", localai.API)
-        plan = fai.check(dict(raw), files)
-        good = plan["action"] == act and test(plan)
+        if act == "unknown":
+            try:
+                fai.check(fai.fix_plan(dict(raw), text, files), files); good = False
+            except ValueError:
+                good = True
+        else:
+            plan = fai.check(fai.fix_plan(dict(raw), text, files), files)
+            good = plan["action"] == act and test(plan)
     except Exception as e:
         raw, good = repr(e), False
     ok += good

@@ -61,11 +61,74 @@ def list_models():
     except Exception:
         return None
 
+FORMAT_WORDS = [  # 긴 단어 먼저 (피디에프 ⊃ 에프 같은 겹침 방지)
+    ("파워포인트", "pptx"), ("피피티", "pptx"), ("ppt", "pptx"), ("pptx", "pptx"),
+    ("워드", "docx"), ("word", "docx"), ("docx", "docx"),
+    ("압축파일", "zip"), ("압축 파일", "zip"), ("집파일", "zip"), ("zip", "zip"),
+    ("피디에프", "pdf"), ("pdf", "pdf"),
+    ("마크다운", "md"), ("텍스트", "txt"), ("txt", "txt"), ("html", "html"), ("웹페이지", "html"),
+    ("epub", "epub"), ("odt", "odt"),
+]
+SPLIT_WORDS = ["쪼개", "나눠", "나누", "분리", "페이지별", "장별"]
+
+def hints(text, files):
+    """문장에서 확실한 단서만 뽑기 (형식, 쪼개기, 장수, 순서, 화질)"""
+    t = text.lower()
+    for f in files:                                  # 파일명 속 확장자는 형식으로 안 봄
+        t = t.replace(f.lower(), " ").replace(Path(f).stem.lower(), " ")
+    fmt = None
+    pos = len(t) + 1
+    for word, ext in FORMAT_WORDS:                   # 문장에서 제일 마지막에 나온 형식 = 목표 형식
+        i = t.rfind(word)
+        if i >= 0 and (fmt is None or i > pos or (i == pos and len(word) > 0)):
+            fmt, pos = ext, i
+    n = re.search(r"(\d+)\s*장\s*씩|페이지[당에]?\s*(\d+)\s*장|한\s*(?:쪽|장|페이지)에\s*(\d+)", t)
+    return {
+        "fmt": fmt,
+        "split": any(w in t for w in SPLIT_WORDS),
+        "per_page": int(next(g for g in n.groups() if g)) if n else None,
+        "time": any(w in t for w in ["시간", "찍은", "날짜", "촬영"]),
+        "small": any(w in t for w in ["용량", "작게", "가볍", "압축해서"]),
+        "hq": any(w in t for w in ["고화질", "원본", "화질 좋"]),
+    }
+
+def fix_plan(plan, text, files):
+    """작은 AI가 자주 틀리는 부분을 확실한 단서로 바로잡기"""
+    h = hints(text, files)
+    act = plan.get("action")
+    has_img = any(Path(f).suffix.lower() in fconv.IMG_EXT for f in files)
+    if act == "split" and not h["split"]:            # 쪼개란 말 없는데 split → 묶기/변환으로
+        act = plan["action"] = "bundle" if has_img and h["fmt"] in {"pdf", "docx", "pptx", "zip", None} else "convert"
+        if act == "bundle":
+            plan["files"] = IMG_GLOBS
+    if act == "bundle":
+        fl = plan.get("files") or []
+        if not fl or all(any(c in f for c in "*?[") for f in fl):   # "사진 전부" → 모든 이미지 형식
+            plan["files"] = IMG_GLOBS
+        if not h["time"] and plan.get("sort") == "time":             # 시킨 적 없는 시간순은 취소
+            plan["sort"] = "name"
+        if h["fmt"] in {"pdf", "docx", "pptx", "zip"}:
+            plan["out"] = Path(plan.get("out") or "묶음").stem + "." + h["fmt"]
+        if h["per_page"]:
+            plan["per_page"] = h["per_page"]
+        if h["time"]:
+            plan["sort"] = "time"
+        if h["small"]:
+            plan.update(quality=60, max_size=1500)
+        if h["hq"]:
+            plan.update(quality=95, max_size=0)
+    elif act == "convert" and h["fmt"]:
+        plan["target"] = h["fmt"]
+    return plan
+
+def ai_plan(text, files, model=None, api=None):
+    return fix_plan(ask_ai(text, files, model, api), text, files)
+
 def make_plan(text, files, model=None, api=None):
     """요청 → (검사된 계획, 'AI'|'규칙'). AI가 틀리면 규칙으로 한 번 더. 둘 다 실패 시 ValueError"""
     if model:
         try:
-            return check(ask_ai(text, files, model, api), files), "AI"
+            return check(ai_plan(text, files, model, api), files), "AI"
         except Exception:
             pass
     return check(ask_rules(text, files), files), "규칙"
