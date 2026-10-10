@@ -25,5 +25,9 @@ for text, act, test in cases:
     except Exception as e:
         raw, good = repr(e), False
     ok += good
-    print(f"{'O' if good else 'X'}  {time.time() - t0:4.1f}s  {text}\n      AI: {raw}")
+    line = f"{time.time() - t0:4.1f}s  {text}  →  AI: {raw}".replace("\n", " ")
+    print(f"{'O' if good else 'X'}  {line}")
+    if not good:
+        print(f"::warning::틀림  {line}")
 print(f"\n결과: {ok}/{len(cases)} 맞음")
+print(f"::notice::AI 테스트 결과 {ok}/{len(cases)} 맞음")
