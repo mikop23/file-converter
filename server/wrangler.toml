@@ -1,0 +1,19 @@
+name = "file-converter-relay"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+
+[vars]
+# 말 알아듣기용 (빠르고 싼 모델) / 글자 추출용 (이미지 잘 읽는 모델)
+PLAN_MODEL = "claude-haiku-5-5"
+OCR_MODEL = "claude-sonnet-5-5"
+# 사이트 주소만 허용하려면 쉼표로: "https://mikop23.github.io"
+ALLOWED_ORIGINS = "*"
+
+# 같은 IP에서 1분에 20번까지
+[[ratelimits]]
+name = "LIMITER"
+namespace_id = "1001"
+
+  [ratelimits.simple]
+  limit = 20
+  period = 60

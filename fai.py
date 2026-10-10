@@ -119,19 +119,27 @@ def fix_plan(plan, text, files):
             plan.update(quality=95, max_size=0)
     elif act == "convert" and h["fmt"]:
         plan["target"] = h["fmt"]
+    elif act == "ocr" and h["fmt"] in {"docx", "txt", "md"}:
+        plan["target"] = h["fmt"]
     return plan
 
 def ai_plan(text, files, model=None, api=None):
     return fix_plan(ask_ai(text, files, model, api), text, files)
 
-def make_plan(text, files, model=None, api=None):
+def make_plan(text, files, model=None, api=None, online=False):
     """요청 → (검사된 계획, 'AI'|'규칙'). AI가 틀리면 규칙으로 한 번 더. 둘 다 실패 시 ValueError"""
+    if online:
+        import relay
+        try:
+            return check(fix_plan(relay.plan(text, files), text, files), files, allow_ocr=True), "온라인 AI"
+        except Exception:
+            pass
     if model:
         try:
             return check(ai_plan(text, files, model, api), files), "AI"
         except Exception:
             pass
-    return check(ask_rules(text, files), files), "규칙"
+    return check(ask_rules(text, files, ocr=online), files, allow_ocr=online), "규칙"
 
 def ask_ai(text, files, model=None, api=None):
     listing = "\n".join(files[:200]) or "(비어 있음)"
@@ -152,17 +160,24 @@ def ask_ai(text, files, model=None, api=None):
 
 
 # ───────── AI 없을 때 쓰는 규칙 기반 해석 ─────────
-def ask_rules(text, files):
+OCR_WORDS = ["글자", "텍스트로", "타이핑", "ocr", "받아적", "받아 적", "글씨"]
+
+def ask_rules(text, files, ocr=False):
     t = text.lower()
-    named = [f for f in files if f.lower() in t]
+    named = [f for f in files if f.lower() in t or (len(Path(f).stem) >= 2 and Path(f).stem.lower() in t)]
     rest = t
-    for f in named: rest = rest.replace(f.lower(), " ")   # 파일명 속 확장자는 형식으로 안 봄
+    for f in named: rest = rest.replace(f.lower(), " ").replace(Path(f).stem.lower(), " ")   # 파일명 속 확장자는 형식으로 안 봄
     fmt = next((f for f in ["pptx", "docx", "pdf", "zip", "html", "md", "txt", "epub", "odt", "png", "jpg"]
                 if f in rest), None)
     alias = {"피피티": "pptx", "ppt": "pptx", "파워포인트": "pptx", "워드": "docx", "word": "docx",
              "압축": "zip", "마크다운": "md", "텍스트": "txt", "웹": "html", "pdf": "pdf", "피디에프": "pdf"}
     for k, v in alias.items():
         if k in rest and not fmt: fmt = v
+
+    if ocr and any(k in t for k in OCR_WORDS):
+        src = named or [f for f in files if Path(f).suffix.lower() in fconv.IMG_EXT | {".pdf"}]
+        tgt = "txt" if ("txt" in rest or "메모장" in t) else "md" if fmt == "md" else "docx"
+        return {"action": "ocr", "files": src, "target": tgt}
 
     if any(k in t for k in ["쪼개", "나눠", "분리", "이미지로", "사진으로"]) and \
             any(f.lower().endswith(".pdf") for f in files):
@@ -192,9 +207,9 @@ def resolve(patterns, files):
         out += [h for h in hits if h not in out]
     return sorted(out, key=fconv.natural_key)
 
-def check(plan, files):
+def check(plan, files, allow_ocr=False):
     act = plan.get("action")
-    if act not in {"bundle", "convert", "split"}:
+    if act not in {"bundle", "convert", "split"} | ({"ocr"} if allow_ocr else set()):
         raise ValueError(plan.get("reason", "처리할 수 없는 요청"))
     real = resolve(plan.get("files") or [], files)
     if not real:
@@ -206,6 +221,12 @@ def check(plan, files):
         plan["files"] = [f for f in real if Path(f).suffix.lower().lstrip(".") != tgt]
         if not plan["files"]:
             raise ValueError("이미 그 형식이야")
+    if act == "ocr":
+        plan["files"] = [f for f in real if Path(f).suffix.lower() in fconv.IMG_EXT | {".pdf"}]
+        tgt = str(plan.get("target") or "docx").lower().lstrip(".")
+        plan["target"] = tgt if tgt in {"docx", "txt", "md"} else "docx"
+        if not plan["files"]:
+            raise ValueError("글자를 뽑을 사진이나 PDF가 없음")
     if act == "bundle":
         out = Path(plan.get("out") or "묶음.pdf").name             # 폴더 밖으로 못 나가게
         if Path(out).suffix.lower() not in {".pdf", ".docx", ".pptx", ".zip"}:
@@ -227,6 +248,8 @@ def describe(p):
         return f"이미지 {n}장({head}) → {p['out']}" + (f"  [{', '.join(extra)}]" if extra else "")
     if p["action"] == "convert":
         return f"{head} → {p['target']} 변환"
+    if p["action"] == "ocr":
+        return f"{head} → 글자 뽑아서 {p['target']} 문서로 (온라인)"
     return f"{head} → 페이지별 {p.get('format','jpg')} 이미지"
 
 

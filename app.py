@@ -16,7 +16,9 @@ from PySide6.QtWidgets import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import fconv, fai, localai
+import fconv, fai, localai, relay
+
+ONLINE = relay.edition() == "online"
 
 DOC_EXT = {".md", ".docx", ".doc", ".html", ".htm", ".txt", ".odt", ".epub", ".rtf",
            ".pptx", ".ppt", ".xlsx", ".xls", ".pdf", ".hwp", ".rst", ".tex"}
@@ -67,7 +69,7 @@ class Worker(QObject):
     def run(self):
         try:
             self.done.emit(self.fn(self.progress.emit) if self.with_progress else self.fn())
-        except (SystemExit, ValueError) as e:   # fconv·fai가 내는 친절한 오류
+        except (SystemExit, ValueError, ConnectionError) as e:   # 친절한 오류 메시지
             self.failed.emit(str(e))
         except Exception as e:
             traceback.print_exc()
@@ -177,7 +179,7 @@ class FileList(QListWidget):
 class Main(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("파일 변환기")
+        self.setWindowTitle("파일 변환기 (온라인)" if ONLINE else "파일 변환기 (오프라인)")
         self.resize(980, 640)
         self.out_dir = None          # None이면 첫 파일 폴더
         self.last_out = None
@@ -210,6 +212,11 @@ class Main(QMainWindow):
         top.addWidget(self.ai_chip)
         top.addWidget(self.get_ai_btn)
         top.addWidget(self.model_box)
+        if ONLINE:
+            srv = QPushButton("서버")
+            srv.setToolTip("온라인 AI 서버 주소 설정")
+            srv.clicked.connect(self.set_server)
+            top.addWidget(srv)
         top.addWidget(refresh)
         outer.addLayout(top)
 
@@ -279,6 +286,19 @@ class Main(QMainWindow):
         cr.addWidget(self.split_btn)
         pv.addLayout(cr)
 
+        self.ocr_btn = QPushButton("글자 뽑기")
+        if ONLINE:
+            pv.addSpacing(8)
+            pv.addWidget(QLabel("글자 추출 · 온라인", objectName="section"))
+            orow = QHBoxLayout()
+            self.ocr_target = QComboBox()
+            self.ocr_target.addItems(["Word (docx)", "텍스트 (txt)", "마크다운 (md)"])
+            self.ocr_target.setToolTip("사진·스캔 PDF 속 글자를 AI가 읽어서 문서로 만들어요")
+            self.ocr_btn.clicked.connect(self.run_ocr)
+            orow.addWidget(self.ocr_target, 1)
+            orow.addWidget(self.ocr_btn)
+            pv.addLayout(orow)
+
         pv.addSpacing(8)
         pv.addWidget(QLabel("옵션", objectName="section"))
         og = QGridLayout(); og.setHorizontalSpacing(8); og.setVerticalSpacing(6)
@@ -333,7 +353,7 @@ class Main(QMainWindow):
         self.log.setText(text)
 
     def busy(self, on, text=""):
-        for w in self.quick_btns + [self.ask_btn, self.conv_btn, self.split_btn]:
+        for w in self.quick_btns + [self.ask_btn, self.conv_btn, self.split_btn, self.ocr_btn]:
             w.setEnabled(not on)
         self.bar.setVisible(on)
         if on:
@@ -396,6 +416,7 @@ class Main(QMainWindow):
             b.setEnabled(n_img > 0)
         self.conv_btn.setEnabled(len(paths) > 0)
         self.split_btn.setEnabled(n_pdf > 0)
+        self.ocr_btn.setEnabled(n_img + n_pdf > 0)
         self.ask_btn.setEnabled(len(paths) > 0)
 
     def done_msg(self, out, extra=""):
@@ -506,8 +527,9 @@ class Main(QMainWindow):
                 return self.status("취소했어요.")
             self.exec_plan(plan, plan_paths)
 
-        self.background(lambda: fai.make_plan(text, names, model, api), got_plan,
-                        "AI가 요청을 해석하는 중…" if model else "요청 해석 중…")
+        online = self.ai_mode == "online"
+        self.background(lambda: fai.make_plan(text, names, model, api, online=online), got_plan,
+                        "AI가 요청을 해석하는 중…" if (model or online) else "요청 해석 중…")
 
     def exec_plan(self, plan, paths):
         folder = self.out_folder(paths)
@@ -522,6 +544,8 @@ class Main(QMainWindow):
             self.background(lambda: [fconv.convert(p, tgt, fconv.unique_path(folder / (Path(p).stem + "." + tgt)))
                                      for p in paths][-1],
                             lambda r: self.done_msg(r), "변환 중…")
+        elif a == "ocr":
+            self.run_ocr(paths, plan["target"])
         elif a == "split":
             fmt = plan.get("format", "jpg")
             self.background(lambda: [fconv.split(p, fmt, 150, fconv.unique_path(folder / (Path(p).stem + "_pages")))
@@ -535,9 +559,52 @@ class Main(QMainWindow):
         self.ai_chip.setStyleSheet("background:#dcfce7; color:#166534;" if on
                                    else "background:#f3f4f6; color:#4b5563;")
 
+    # ── 온라인 에디션 ──
+    def set_server(self):
+        from PySide6.QtWidgets import QInputDialog
+        url, ok = QInputDialog.getText(self, "서버 주소", "온라인 AI 중계 서버 주소:", text=relay.server_url())
+        if ok:
+            relay.save_config(relay_url=url.strip())
+            self.check_ai()
+
+    def run_ocr(self, paths=None, target=None):
+        paths = paths or [p for p in self.files.paths() if Path(p).suffix.lower() in fconv.IMG_EXT | {".pdf"}]
+        target = target or ["docx", "txt", "md"][self.ocr_target.currentIndex()]
+        if not paths:
+            return
+        if not relay.load_config().get("ocr_ok"):
+            msg = ("글자 추출은 사진·PDF 내용을 온라인 AI(Claude) 서버로 보내서 읽어요.\n"
+                   "개인정보가 있는 문서는 주의해주세요.\n\n계속할까요?")
+            if QMessageBox.question(self, "온라인 전송 안내", msg) != QMessageBox.Yes:
+                return self.status("취소했어요.")
+            relay.save_config(ocr_ok=True)
+        name = (self.name.text().strip() or "묶음")
+        name = "글자추출" if name == "묶음" else name
+        out = self.out_folder(paths) / f"{name}.{target}"
+
+        def prog(done, total):
+            self.status(f"글자 뽑는 중… {int(done)}/{int(total)}쪽")
+        self.background(lambda progress: relay.ocr_files(paths, target, out, progress),
+                        lambda r: self.done_msg(r, f" · {len(paths)}개 파일"),
+                        "글자 뽑는 중… (한 쪽에 몇 초씩 걸려요)", on_progress=prog)
+
     def check_ai(self):
-        self.models = fai.list_models()
         self.get_ai_btn.setVisible(False)
+        if ONLINE:
+            self.model_box.setVisible(False)
+            self.set_chip("◐ 서버 확인 중…", False)
+
+            def ok(alive):
+                self.ai_mode = "online" if alive else None
+                if alive:
+                    self.set_chip("● 온라인 AI", True, "Claude · 글자 추출과 말 알아듣기에 사용")
+                elif not relay.server_url():
+                    self.set_chip("○ 서버 미설정", False, "오른쪽 '서버' 버튼으로 주소를 넣어주세요. 지금은 규칙 모드예요.")
+                else:
+                    self.set_chip("○ 오프라인 (규칙 모드)", False, "서버에 연결이 안 돼요. 인터넷을 확인해주세요.")
+            return self.background(relay.health, ok, "", block=False,
+                                   on_fail=lambda m: self.set_chip("○ 규칙 모드", False, m))
+        self.models = fai.list_models()
         if self.models:
             self.ai_mode = "ollama"
             cur = self.model_box.currentText()

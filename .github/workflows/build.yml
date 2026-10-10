@@ -12,8 +12,22 @@ permissions:
   contents: write
 
 jobs:
+  server-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: 중계 서버 테스트
+        run: node server/test.mjs
+
   build:
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        edition: [offline, online]
     steps:
       - uses: actions/checkout@v5
 
@@ -36,7 +50,8 @@ jobs:
           New-Item -ItemType Directory -Force bin | Out-Null
           Get-ChildItem pandoc_tmp -Recurse -Filter pandoc.exe | Select-Object -First 1 | Copy-Item -Destination bin\pandoc.exe
 
-      - name: AI 엔진 포함 (llama.cpp)
+      - name: AI 엔진 포함 (llama.cpp, 오프라인 버전만)
+        if: matrix.edition == 'offline'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -59,29 +74,42 @@ jobs:
           Copy-Item "$($srv.DirectoryName)\*.dll" bin\llama\
           Copy-Item $srv.FullName bin\llama\
 
+      - name: 에디션 설정 파일
+        shell: pwsh
+        env:
+          RELAY_URL: ${{ vars.RELAY_URL }}
+        run: |
+          @{ edition = "${{ matrix.edition }}"; relay_url = "$env:RELAY_URL" } | ConvertTo-Json | Set-Content -Encoding utf8 edition.json
+          Get-Content edition.json
+          if ("${{ matrix.edition }}" -eq "online" -and !$env:RELAY_URL) { Write-Host "::warning::RELAY_URL 변수가 없어요. 온라인 버전은 프로그램 안 '서버' 버튼으로 주소를 넣어야 해요." }
+
       - name: exe 만들기
-        run: >
-          pyinstaller --noconfirm --windowed --name FileConverter
-          --add-binary "bin\pandoc.exe;bin"
-          --add-data "bin\llama;bin\llama"
-          app.py
+        shell: pwsh
+        run: |
+          $pa = @("--noconfirm", "--windowed", "--name", "FileConverter",
+                    "--add-binary", "bin\pandoc.exe;bin", "--add-data", "edition.json;.")
+          if ("${{ matrix.edition }}" -eq "offline") { $pa += @("--add-data", "bin\llama;bin\llama") }
+          pyinstaller @pa app.py
 
       - name: 실행 테스트 (부품 다 들어갔는지)
         shell: pwsh
         run: |
           $env:QT_QPA_PLATFORM = "offscreen"
-          python -c "import app, fconv, fai, docx, pptx, pypdfium2, pdf2docx; print('imports ok')"
+          python -c "import app, fconv, fai, relay, docx, pptx, pypdfium2, pdf2docx; print('imports ok')"
           if (!(Test-Path dist\FileConverter\FileConverter.exe)) { exit 1 }
           if (!(Test-Path dist\FileConverter\_internal\bin\pandoc.exe)) { exit 1 }
-          if (!(Test-Path dist\FileConverter\_internal\bin\llama\llama-server.exe)) { exit 1 }
+          if (!(Test-Path dist\FileConverter\_internal\edition.json)) { exit 1 }
+          if ("${{ matrix.edition }}" -eq "offline" -and !(Test-Path dist\FileConverter\_internal\bin\llama\llama-server.exe)) { exit 1 }
 
       - name: AI 모델 캐시
+        if: matrix.edition == 'offline'
         uses: actions/cache@v5
         with:
           path: model
           key: qwen2.5-1.5b-q4km
 
       - name: 진짜 AI로 말 알아듣기 테스트
+        if: matrix.edition == 'offline'
         continue-on-error: true
         shell: pwsh
         run: |
@@ -97,15 +125,15 @@ jobs:
         shell: pwsh
         run: |
           Copy-Item 설명서.txt dist\FileConverter\
-          Compress-Archive dist\FileConverter\* FileConverter-windows.zip
+          Compress-Archive dist\FileConverter\* FileConverter-${{ matrix.edition }}-windows.zip
 
       - uses: actions/upload-artifact@v5
         with:
-          name: FileConverter-windows
-          path: FileConverter-windows.zip
+          name: FileConverter-${{ matrix.edition }}-windows
+          path: FileConverter-${{ matrix.edition }}-windows.zip
 
       - name: 배포 페이지(Release)에 올리기
         if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: FileConverter-windows.zip
+          files: FileConverter-${{ matrix.edition }}-windows.zip

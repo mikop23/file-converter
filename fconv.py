@@ -308,6 +308,41 @@ def split(pdf, fmt="jpg", dpi=150, outdir=None):
     return outdir
 
 
+# ───────── ④ 글(마크다운) → 문서 파일 ─────────
+def text_to_document(markdown, target, out):
+    """OCR로 얻은 마크다운 글을 docx/txt/md로 저장"""
+    out = unique_path(out)
+    target = target.lower().lstrip(".")
+    if target == "md":
+        out.write_text(markdown, encoding="utf-8")
+        return out
+    with tempfile.TemporaryDirectory() as td:
+        md = Path(td) / "ocr.md"
+        md.write_text(markdown, encoding="utf-8")
+        pandoc = find_tool("pandoc")
+        if pandoc:
+            fmt = {"docx": "docx", "txt": "plain"}[target]
+            r = subprocess.run([pandoc, str(md), "-f", "markdown", "-t", fmt, "-o", str(out)],
+                               capture_output=True, text=True, **NO_WINDOW)
+            if r.returncode == 0:
+                return out
+        if target == "txt":                          # pandoc 없을 때: 글 그대로
+            out.write_text(markdown, encoding="utf-8")
+            return out
+        from docx import Document                     # pandoc 없을 때: 간단 변환
+        doc = Document()
+        for line in markdown.splitlines():
+            t = line.strip()
+            if t.startswith("#"):
+                doc.add_heading(t.lstrip("#").strip(), min(t.count("#", 0, 6) or 1, 4))
+            elif t.startswith(("- ", "* ")):
+                doc.add_paragraph(t[2:], style="List Bullet")
+            elif t:
+                doc.add_paragraph(t)
+        doc.save(out)
+    return out
+
+
 # ───────── CLI ─────────
 def main():
     ap = argparse.ArgumentParser(description="문서 변환 + 이미지 묶기 도구")
