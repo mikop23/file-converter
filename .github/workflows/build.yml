@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -74,7 +76,7 @@ jobs:
           if (!(Test-Path dist\FileConverter\_internal\bin\llama\llama-server.exe)) { exit 1 }
 
       - name: AI 모델 캐시
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: model
           key: qwen2.5-1.5b-q4km
@@ -97,13 +99,13 @@ jobs:
           Copy-Item 설명서.txt dist\FileConverter\
           Compress-Archive dist\FileConverter\* FileConverter-windows.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: FileConverter-windows
           path: FileConverter-windows.zip
 
       - name: 배포 페이지(Release)에 올리기
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: FileConverter-windows.zip
