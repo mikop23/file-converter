@@ -13,9 +13,9 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -39,10 +39,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download -R ggml-org/llama.cpp --pattern "*bin-win-cpu-x64.zip" -O llama.zip
-          if (!(Test-Path llama.zip)) { gh release download -R ggml-org/llama.cpp --pattern "*bin-win-avx2-x64.zip" -O llama.zip }
+          $assets = (gh release view -R ggml-org/llama.cpp --json assets | ConvertFrom-Json).assets.name
+          $win = $assets | Where-Object { $_ -match 'win' -and $_ -match 'x64' -and $_ -match '\.zip$' -and $_ -notmatch 'cuda|cudart|vulkan|hip|sycl|opencl|arm|kompute' }
+          $pick = ($win | Where-Object { $_ -match 'cpu' } | Select-Object -First 1)
+          if (!$pick) { $pick = ($win | Where-Object { $_ -match 'avx2' } | Select-Object -First 1) }
+          if (!$pick) { $pick = $win | Select-Object -First 1 }
+          if (!$pick) { Write-Host "::error::llama.cpp 윈도우 파일 못 찾음. 목록: $($assets -join ', ')"; exit 1 }
+          Write-Host "::notice::llama.cpp 사용 파일: $pick"
+          gh release download -R ggml-org/llama.cpp --pattern $pick -O llama.zip
           Expand-Archive llama.zip -DestinationPath llama_tmp
           $srv = Get-ChildItem llama_tmp -Recurse -Filter llama-server.exe | Select-Object -First 1
+          if (!$srv) { Write-Host "::error::$pick 안에 llama-server.exe 없음"; exit 1 }
           New-Item -ItemType Directory -Force bin\llama | Out-Null
           Copy-Item "$($srv.DirectoryName)\*.dll" bin\llama\
           Copy-Item $srv.FullName bin\llama\
