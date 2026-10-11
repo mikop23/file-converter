@@ -71,16 +71,21 @@ header p { margin: 0; color: var(--muted); font-size: 13.5px; }
 .empty .kinds { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
 .empty .kinds span { font-size: 12.5px; padding: 3px 9px; border-radius: 99px; background: var(--bg); }
 #list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-#list li { display: grid; grid-template-columns: 22px 44px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 5px 6px; border-radius: 8px; cursor: grab; }
+#list li { display: grid; grid-template-columns: 22px 44px minmax(0, 1fr) auto 36px 32px; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 8px; cursor: grab; }
+@media (max-width: 480px) { #list li { grid-template-columns: 18px 44px minmax(0, 1fr) 40px 34px; } #list .fsize { display: none; } }
 #list li:hover { background: var(--bg); }
 #list li.dragging { opacity: .4; }
 #list li.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 .idx { font: 12px var(--mono); color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.thumb { transition: transform .2s; }
 .thumb { width: 44px; height: 44px; border-radius: 6px; object-fit: cover; background: var(--bg); display: grid; place-items: center; font: 600 10.5px var(--mono); color: var(--muted); text-transform: uppercase; border: 1px solid var(--line); }
 .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fsize { font: 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
 .rm { border: 0; background: none; color: var(--muted); width: 30px; height: 30px; border-radius: 6px; cursor: pointer; font-size: 18px; line-height: 1; }
 .rm:hover { background: var(--err-soft); color: var(--err); }
+.rot { border: 1px solid var(--line); background: var(--surface); color: var(--fg); width: 36px; height: 36px; border-radius: 8px; cursor: pointer; font-size: 18px; line-height: 1; }
+.rot:hover { border-color: var(--accent); color: var(--accent); }
+@media (max-width: 480px) { .rot { width: 40px; height: 40px; } }
 .trayrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
 .trayrow .count { margin-left: auto; color: var(--muted); font-size: 13px; }
 .tip { margin: 8px 2px 0; color: var(--muted); font-size: 12.5px; }
@@ -173,7 +178,7 @@ footer a { color: inherit; }
         <button id="clear" class="btn ghost" type="button">모두 빼기</button>
         <span id="count" class="count"></span>
       </div>
-      <p class="tip" id="trayTip" hidden>줄을 끌어서 순서를 바꿀 수 있어요. 사진을 합칠 때 이 순서대로 들어가요.</p>
+      <p class="tip" id="trayTip" hidden>줄을 끌어서 순서를 바꿀 수 있어요. 누운 사진은 ⟳를 눌러 돌리세요. 만드는 파일에 그대로 들어가요.</p>
     </section>
 
     <section class="tasks" aria-labelledby="s2">

@@ -7,6 +7,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL("./vendor/pdf.worker.min.mjs", imp
 const $ = (s) => document.querySelector(s);
 const QUALITY = { normal: [0.8, 2000], small: [0.6, 1500], hq: [0.95, 0] };
 const state = { files: [], busy: false, aiOnline: false, nextId: 1 };
+const TOUCH = matchMedia("(pointer: coarse)").matches;                // 폰·태블릿 (끌어서 순서 바꾸기 안 됨)
 
 // ───────── 저장소 (실패해도 동작) ─────────
 const store = {
@@ -65,12 +66,17 @@ function render() {
     li.draggable = true; li.dataset.id = f.id;
     const thumb = f.thumb ? Object.assign(document.createElement("img"), { src: f.thumb, alt: "", className: "thumb", loading: "lazy" })
                           : Object.assign(document.createElement("span"), { className: "thumb", textContent: ext(f.name) });
+    if (f.kind === "image") thumb.style.transform = `rotate(${f.rot || 0}deg)`;
     const name = Object.assign(document.createElement("span"), { className: "fname", textContent: f.name, title: f.name });
+    const rot = Object.assign(document.createElement("button"), { className: "rot", type: "button", textContent: "⟳", title: "오른쪽으로 90° 돌리기" });
+    rot.setAttribute("aria-label", f.name + " 돌리기");
+    if (f.kind !== "image") { rot.style.visibility = "hidden"; rot.tabIndex = -1; }   // 자리는 남겨서 × 줄 맞춤
+    rot.onclick = () => { f.rot = ((f.rot || 0) + 90) % 360; thumb.style.transform = `rotate(${f.rot}deg)`; refresh(); };
     const rm = Object.assign(document.createElement("button"), { className: "rm", type: "button", textContent: "×", title: "빼기" });
     rm.setAttribute("aria-label", f.name + " 빼기");
     rm.onclick = () => { state.files = state.files.filter((x) => x !== f); render(); };
     li.append(Object.assign(document.createElement("span"), { className: "idx", textContent: i + 1 }), thumb, name,
-              Object.assign(document.createElement("span"), { className: "fsize", textContent: fmtSize(f.file.size) }), rm);
+              Object.assign(document.createElement("span"), { className: "fsize", textContent: fmtSize(f.file.size) }), rot, rm);
     return li;
   }));
   $("#drop").classList.toggle("has", state.files.length > 0);
@@ -93,7 +99,9 @@ function refresh() {
   // 지금 못 쓰는 카드는 흐리게 + 이유 보여주기
   document.querySelectorAll("[data-why]").forEach((w) => { w.hidden = has[w.dataset.why]; w.closest(".card").classList.toggle("off", !has[w.dataset.why]); });
   $("#imgConvTip").hidden = n("image") < 4;
-  $("#trayTip").hidden = state.files.length < 2;
+  $("#trayTip").hidden = state.files.length < 2 && !has.image;
+  $("#trayTip").textContent = (TOUCH ? "순서는 '사진 한 파일로 합치기'의 순서 옵션(파일 이름순·찍은 시간순)으로 정할 수 있어요."
+                                     : "줄을 끌어서 순서를 바꿀 수 있어요.") + " 누운 사진은 ⟳를 눌러 돌리세요. 만드는 파일에 그대로 들어가요.";
   $("#ocrSec").classList.toggle("off", !ocrReady);
   $("#ocrNote").textContent = !relayUrl() ? "⚙ 설정에서 AI를 연결하면 쓸 수 있어요."
     : !state.aiOnline ? "AI에 연결이 안 돼요. 인터넷을 확인해주세요."
@@ -131,19 +139,27 @@ drop.addEventListener("drop", (e) => { if (dragId != null || !e.dataTransfer.fil
 $("#pick").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
 $("#clear").onclick = () => { state.files = []; render(); };
 
-// ───────── 이미지 준비 (회전 보정 + 크기 줄이기 + JPEG 압축) ─────────
-async function prepareImage(file, quality = "normal") {
-  const [q, maxSide] = QUALITY[quality] || QUALITY.normal;
-  const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });   // 폰 사진 눕는 문제 해결
-  let { width: w, height: h } = bmp;
-  if (maxSide && Math.max(w, h) > maxSide) { const s = maxSide / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
-  const c = new OffscreenCanvas(w, h);
+// ───────── 사진 그리기: EXIF 회전 보정 + 손으로 돌린 각도 + 크기 줄이기 ─────────
+async function drawImage(f, { maxSide = 0, fill = null } = {}) {
+  const bmp = await createImageBitmap(f.file, { imageOrientation: "from-image" });   // 폰 사진 눕는 문제 해결
+  const rot = f.rot || 0, turn = rot % 180 !== 0;
+  let w = bmp.width, h = bmp.height;
+  if (maxSide && Math.max(w, h) > maxSide) { const k = maxSide / Math.max(w, h); w = Math.round(w * k); h = Math.round(h * k); }
+  const c = new OffscreenCanvas(turn ? h : w, turn ? w : h);
   const g = c.getContext("2d");
-  g.fillStyle = "#fff"; g.fillRect(0, 0, w, h);                                    // 투명 PNG는 흰 배경
-  g.drawImage(bmp, 0, 0, w, h);
+  if (fill) { g.fillStyle = fill; g.fillRect(0, 0, c.width, c.height); }
+  g.translate(c.width / 2, c.height / 2);
+  g.rotate((rot * Math.PI) / 180);
+  g.drawImage(bmp, -w / 2, -h / 2, w, h);
   bmp.close();
+  return c;
+}
+
+async function prepareImage(f, quality = "normal") {
+  const [q, maxSide] = QUALITY[quality] || QUALITY.normal;
+  const c = await drawImage(f, { maxSide, fill: "#fff" });                          // 투명 PNG는 흰 배경
   const blob = await c.convertToBlob({ type: "image/jpeg", quality: q });
-  return { w, h, blob, bytes: new Uint8Array(await blob.arrayBuffer()) };
+  return { w: c.width, h: c.height, blob, bytes: new Uint8Array(await blob.arrayBuffer()) };
 }
 
 async function takenTime(f) {
@@ -167,7 +183,7 @@ async function bundle(items, out, { sort = "none", quality = "normal", perPage =
   items = await ordered(items, sort);
   const kind = ext(out);
   const imgs = [];
-  for (const [i, f] of items.entries()) { progress(i, items.length, "사진 준비 중…"); imgs.push({ ...(await prepareImage(f.file, quality)), name: f.name }); }
+  for (const [i, f] of items.entries()) { progress(i, items.length, "사진 준비 중…"); imgs.push({ ...(await prepareImage(f, quality)), name: f.name }); }
   progress(items.length, items.length, "파일 만드는 중…");
   let blob;
   if (kind === "pdf") {
@@ -215,11 +231,7 @@ async function convertImages(items, fmt) {
   const outs = [];
   for (const [i, f] of items.entries()) {
     progress(i, items.length, "사진 바꾸는 중…");
-    const bmp = await createImageBitmap(f.file, { imageOrientation: "from-image" });
-    const c = new OffscreenCanvas(bmp.width, bmp.height);
-    const g = c.getContext("2d");
-    if (fmt === "jpg") { g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); }   // JPG는 투명 배경을 흰색으로
-    g.drawImage(bmp, 0, 0); bmp.close();
+    const c = await drawImage(f, { fill: fmt === "jpg" ? "#fff" : null });            // JPG는 투명 배경을 흰색으로
     const blob = await c.convertToBlob({ type: IMG_MIME[fmt], quality: fmt === "png" ? undefined : 0.92 });
     if (blob.type !== IMG_MIME[fmt]) throw new Error(`이 브라우저는 ${fmt.toUpperCase()} 저장을 지원하지 않아요`);
     outs.push({ blob, name: f.name.replace(/\.[^.]+$/, "") + "." + fmt });
@@ -402,7 +414,7 @@ async function ocr(items, target, outBase) {
   const jobs = [];
   for (const f of items) {
     if (f.kind === "pdf") (await pdfPages(f.file)).forEach((c, i) => jobs.push({ f, c, page: i + 1 }));
-    else { const bmp = await createImageBitmap(f.file, { imageOrientation: "from-image" }); const c = new OffscreenCanvas(bmp.width, bmp.height); c.getContext("2d").drawImage(bmp, 0, 0); jobs.push({ f, c, page: 1 }); }
+    else jobs.push({ f, c: await drawImage(f, { fill: "#fff" }), page: 1 });
   }
   const parts = []; let last = null;
   for (const [i, j] of jobs.entries()) {

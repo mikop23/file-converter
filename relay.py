@@ -84,7 +84,7 @@ def _jpeg_b64(im, max_side=1568):
 def ocr_image(im):
     return _post("/ocr", {"image": _jpeg_b64(im), "media_type": "image/jpeg"}, timeout=120)["text"]
 
-def pages_of(path):
+def pages_of(path, rot=0):
     """사진 1장 → [이미지], PDF → [페이지 이미지...]"""
     p = Path(path)
     if p.suffix.lower() == ".pdf":
@@ -94,11 +94,11 @@ def pages_of(path):
             return [page.render(scale=150 / 72).to_pil() for page in doc]
         finally:
             doc.close()
-    return [fconv.load_image(p, 0)]
+    return [fconv.load_image(p, 0, rot)]
 
-def ocr_files(paths, target, out, progress=None):
+def ocr_files(paths, target, out, progress=None, rotations=None):
     """사진/PDF 여러 개 → 글자 뽑아서 문서 하나로. progress(완료, 전체)"""
-    jobs = [(p, i, im) for p in paths for i, im in enumerate(pages_of(p), 1)]
+    jobs = [(p, i, im) for p in paths for i, im in enumerate(pages_of(p, (rotations or {}).get(str(p), 0)), 1)]
     parts, last = [], None
     for n, (p, i, im) in enumerate(jobs, 1):
         text = ocr_image(im)

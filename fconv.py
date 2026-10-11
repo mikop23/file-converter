@@ -143,7 +143,7 @@ def sort_images(paths, mode):
         return list(paths)
     return sorted(paths, key=taken_time if mode == "time" else natural_key)
 
-def load_image(p, max_size):
+def load_image(p, max_size, rot=0):
     """회전 보정 + RGB 변환 + 크기 축소"""
     if Path(p).suffix.lower() == ".heic":
         try:
@@ -151,6 +151,8 @@ def load_image(p, max_size):
         except ImportError:
             sys.exit("HEIC 사진은 pip install pillow-heif 필요")
     im = ImageOps.exif_transpose(Image.open(p))       # ← 회전 자동 보정
+    if rot % 360:
+        im = im.rotate(-(rot % 360), expand=True)     # ← 직접 돌린 각도 (오른쪽으로)
     if im.mode in ("RGBA", "LA", "P"):
         bg = Image.new("RGB", im.size, "white")
         im = im.convert("RGBA"); bg.paste(im, mask=im.split()[-1]); im = bg
@@ -222,7 +224,7 @@ def convert(src, target, out=None):
 
 
 # ───────── ①-2 사진 형식 바꾸기 (크기·화질 그대로) ─────────
-def convert_image(src, target, out=None):
+def convert_image(src, target, out=None, rot=0):
     src = Path(src)
     target = {"jpeg": "jpg"}.get(target.lower().lstrip("."), target.lower().lstrip("."))
     if target not in {"jpg", "png", "webp"}:
@@ -231,6 +233,8 @@ def convert_image(src, target, out=None):
     if src.suffix.lower() == ".heic":
         load_image(src, 0)                                 # HEIC 열기 준비 (pillow-heif)
     im = ImageOps.exif_transpose(Image.open(src))          # 회전 보정
+    if rot % 360:
+        im = im.rotate(-(rot % 360), expand=True)          # 직접 돌린 각도
     if target == "jpg":
         if im.mode in ("RGBA", "LA", "P"):                 # 투명 배경은 흰색으로
             bg = Image.new("RGB", im.size, "white")
@@ -245,7 +249,8 @@ def convert_image(src, target, out=None):
 
 
 # ───────── ② 이미지 묶기 ─────────
-def bundle(paths, out, sort="name", quality=80, max_size=2000, per_page=1, quiet=False):
+def bundle(paths, out, sort="name", quality=80, max_size=2000, per_page=1, quiet=False, rotations=None):
+    rot = lambda p: (rotations or {}).get(str(p), 0)
     import glob   # 윈도우 cmd는 *.jpg를 안 펼쳐줘서 직접 펼침
     paths = [g for p in paths for g in (glob.glob(str(p)) if any(c in str(p) for c in "*?[") else [p])]
     paths = [p for p in paths if Path(p).suffix.lower() in IMG_EXT]
@@ -255,7 +260,7 @@ def bundle(paths, out, sort="name", quality=80, max_size=2000, per_page=1, quiet
     out = unique_path(out); kind = out.suffix.lower()
 
     if kind == ".pdf":
-        imgs = [Image.open(to_jpeg_bytes(load_image(p, max_size), quality)) for p in paths]
+        imgs = [Image.open(to_jpeg_bytes(load_image(p, max_size, rot(p)), quality)) for p in paths]
         imgs[0].save(out, "PDF", save_all=True, append_images=imgs[1:], resolution=150)
 
     elif kind == ".docx":
@@ -268,7 +273,7 @@ def bundle(paths, out, sort="name", quality=80, max_size=2000, per_page=1, quiet
         usable_w = sec.page_width - sec.left_margin - sec.right_margin
         usable_h = (sec.page_height - sec.top_margin - sec.bottom_margin) / per_page * 0.95
         for i, p in enumerate(paths):
-            im = load_image(p, max_size)
+            im = load_image(p, max_size, rot(p))
             ratio = im.width / im.height
             w = min(usable_w, int(usable_h * ratio))
             doc.add_picture(to_jpeg_bytes(im, quality), width=w)
@@ -283,7 +288,7 @@ def bundle(paths, out, sort="name", quality=80, max_size=2000, per_page=1, quiet
         prs.slide_width, prs.slide_height = Emu(12192000), Emu(6858000)  # 16:9
         W, H = prs.slide_width, prs.slide_height
         for p in paths:
-            im = load_image(p, max_size)
+            im = load_image(p, max_size, rot(p))
             s = prs.slides.add_slide(prs.slide_layouts[6])
             scale = min(W / im.width, H / im.height)
             w, h = int(im.width * scale), int(im.height * scale)
@@ -294,7 +299,7 @@ def bundle(paths, out, sort="name", quality=80, max_size=2000, per_page=1, quiet
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
             for i, p in enumerate(paths, 1):
                 z.writestr(f"{i:03d}_{Path(p).stem}.jpg",
-                           to_jpeg_bytes(load_image(p, max_size), quality).read())
+                           to_jpeg_bytes(load_image(p, max_size, rot(p)), quality).read())
 
     elif kind in {".jpg", ".jpeg", ".png", ".webp"} and len(paths) == 1:
         im = load_image(paths[0], max_size)

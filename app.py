@@ -204,6 +204,29 @@ class FileList(QListWidget):
         sp = QStyle.SP_FileDialogDetailedView if p.suffix.lower() == ".pdf" else QStyle.SP_FileIcon
         return self.style().standardIcon(sp)
 
+    ROT = Qt.UserRole + 1
+
+    def rotate_selected(self):
+        """고른 사진을 오른쪽으로 90° (아무것도 안 골랐으면 사진 전부)"""
+        items = [it for it in self.selectedItems() if Path(it.data(Qt.UserRole)).suffix.lower() in fconv.IMG_EXT]
+        if not items:
+            items = [self.item(i) for i in range(self.count())
+                     if Path(self.item(i).data(Qt.UserRole)).suffix.lower() in fconv.IMG_EXT]
+        for it in items:
+            deg = ((it.data(self.ROT) or 0) + 90) % 360
+            it.setData(self.ROT, deg)
+            from PySide6.QtGui import QTransform
+            icon = self._icon(Path(it.data(Qt.UserRole)))
+            pm = icon.pixmap(88, 88).transformed(QTransform().rotate(deg), Qt.SmoothTransformation)
+            it.setIcon(QIcon(pm))
+            base = it.text().split("   ⟳")[0]
+            it.setText(base + (f"   ⟳ {deg}°" if deg else ""))
+        self.changed.emit()
+        return len(items)
+
+    def rotations(self):
+        return {self.item(i).data(Qt.UserRole): self.item(i).data(self.ROT) or 0 for i in range(self.count())}
+
     def remove_selected(self):
         for it in self.selectedItems():
             self.takeItem(self.row(it))
@@ -314,19 +337,22 @@ class Main(QMainWindow):
         left.addWidget(self.files, 1)
         row = QHBoxLayout()
         b_add = QPushButton("+ 파일 고르기", objectName="primary"); b_add.clicked.connect(self.pick_files)
+        b_rot = QPushButton("⟳ 돌리기"); b_rot.setToolTip("고른 사진을 오른쪽으로 90° (안 고르면 사진 전부) · Ctrl+R")
+        b_rot.clicked.connect(self.rotate)
         b_del = QPushButton("고른 것 빼기", objectName="ghost"); b_del.clicked.connect(self.files.remove_selected)
         b_clr = QPushButton("모두 빼기", objectName="ghost")
         b_clr.clicked.connect(lambda: (self.files.clear(), self.on_files_changed()))
         self.count_lbl = label("", "count")
-        for w in (b_add, b_del, b_clr):
+        for w in (b_add, b_rot, b_del, b_clr):
             row.addWidget(w)
         row.addStretch()
         row.addWidget(self.count_lbl)
         left.addLayout(row)
-        self.tray_tip = label("줄을 끌어서 순서를 바꿀 수 있어요. 사진을 합칠 때 이 순서대로 들어가요.", "hint", wrap=True)
+        self.tray_tip = label("줄을 끌어서 순서를 바꿀 수 있어요. 누운 사진은 골라서 ⟳ 돌리기를 누르세요. 만드는 파일에 그대로 들어가요.", "hint", wrap=True)
         left.addWidget(self.tray_tip)
         body.addLayout(left, 1)
         QShortcut(QKeySequence.Delete, self.files, activated=self.files.remove_selected)
+        QShortcut(QKeySequence("Ctrl+R"), self, activated=self.rotate)
 
         # ── 2 할 일 고르기 (카드) ──
         right = QVBoxLayout(); right.setSpacing(8)
@@ -601,6 +627,11 @@ class Main(QMainWindow):
             target = self.last_out if self.last_out.is_dir() else self.last_out.parent
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
 
+    def rotate(self):
+        n = self.files.rotate_selected()
+        if n:
+            self.status(f"사진 {n}장을 오른쪽으로 90° 돌렸어요. 만드는 파일에 그대로 들어가요.")
+
     # ── 버튼 작업 ──
     def run_bundle(self, ext, paths=None, plan=None):
         _, img, _, _ = self.kinds()
@@ -613,7 +644,8 @@ class Main(QMainWindow):
         else:
             name = (self.name.text().strip() or "묶음").replace("/", "_").replace("\\", "_")
             out = self.out_folder(imgs) / f"{name}.{ext}"
-        self.background(lambda: fconv.bundle(imgs, out, o["sort"], o["quality"], o["max_size"], o["per_page"], quiet=True),
+        rots = self.files.rotations()
+        self.background(lambda: fconv.bundle(imgs, out, o["sort"], o["quality"], o["max_size"], o["per_page"], quiet=True, rotations=rots),
                         lambda r: self.done_msg(r, f" · 사진 {len(imgs)}장"),
                         f"사진 {len(imgs)}장을 {Path(out).suffix[1:].upper()} 한 파일로 합치는 중…")
 
@@ -621,11 +653,12 @@ class Main(QMainWindow):
         _, img, _, _ = self.kinds()
         srcs = paths or img
         folder = self.out_folder(srcs)
+        rots = self.files.rotations()
 
         def job(progress):
             outs = []
             for i, s in enumerate(srcs, 1):
-                outs.append(fconv.convert_image(s, fmt, folder / (Path(s).stem + "." + fmt)))
+                outs.append(fconv.convert_image(s, fmt, folder / (Path(s).stem + "." + fmt), rots.get(s, 0)))
                 progress(i, len(srcs))
             return outs
 
@@ -688,7 +721,8 @@ class Main(QMainWindow):
         def prog(done, total):
             self.bar.setRange(0, int(total)); self.bar.setValue(int(done))
             self.status(f"글자 뽑는 중… {int(done)}/{int(total)}쪽")
-        self.background(lambda progress: relay.ocr_files(paths, target, out, progress),
+        rots = self.files.rotations()
+        self.background(lambda progress: relay.ocr_files(paths, target, out, progress, rots),
                         lambda r: self.done_msg(r), "글자 뽑는 중… (한 쪽에 몇 초씩 걸려요)", on_progress=prog)
 
     # ── 글로 시키기 ──
