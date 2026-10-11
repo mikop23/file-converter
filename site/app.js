@@ -82,13 +82,25 @@ function render() {
 
 function refresh() {
   const n = (k) => state.files.filter((f) => f.kind === k).length;
+  const has = { image: n("image") > 0, pdf: n("pdf") > 0, doc: n("doc") > 0 };
   const dis = (el, off) => { el.disabled = state.busy || off; };
-  document.querySelectorAll("[data-bundle]").forEach((b) => dis(b, !n("image")));
-  dis($("#convBtn"), !n("doc"));
-  dis($("#splitBtn"), !n("pdf"));
-  dis($("#ocrBtn"), !(n("image") + n("pdf")) || !relayUrl());
+  document.querySelectorAll("[data-bundle], [data-imgconv]").forEach((b) => dis(b, !has.image));
+  dis($("#convBtn"), !has.doc);
+  dis($("#splitBtn"), !has.pdf);
   dis($("#askBtn"), !state.files.length);
-  $("#ocrNote").textContent = relayUrl() ? "사진·스캔 PDF를 AI 서버로 보내서 읽어요." : "오른쪽 위 'AI 서버'에 주소를 넣으면 쓸 수 있어요.";
+  const ocrReady = (has.image || has.pdf) && state.aiOnline;
+  dis($("#ocrBtn"), !ocrReady);
+  // 지금 못 쓰는 카드는 흐리게 + 이유 보여주기
+  document.querySelectorAll("[data-why]").forEach((w) => { w.hidden = has[w.dataset.why]; w.closest(".card").classList.toggle("off", !has[w.dataset.why]); });
+  $("#imgConvTip").hidden = n("image") < 4;
+  $("#trayTip").hidden = state.files.length < 2;
+  $("#ocrSec").classList.toggle("off", !ocrReady);
+  $("#ocrNote").textContent = !relayUrl() ? "⚙ 설정에서 AI를 연결하면 쓸 수 있어요."
+    : !state.aiOnline ? "AI에 연결이 안 돼요. 인터넷을 확인해주세요."
+    : !(has.image || has.pdf) ? "사진이나 PDF를 넣으면 쓸 수 있어요."
+    : "사진 내용이 AI로 전송돼서 읽혀요.";
+  $("#askWhy").textContent = state.aiOnline ? "AI가 켜져 있어서 자유롭게 써도 알아들어요."
+    : "지금은 간단한 문장만 알아들어요. (형식 이름과 '합쳐줘·바꿔줘·쪼개줘' 같은 말)";
 }
 
 // 끌어서 순서 바꾸기
@@ -195,6 +207,32 @@ async function bundle(items, out, { sort = "none", quality = "normal", perPage =
     blob = await z.generateAsync({ type: "blob" });
   } else throw new Error(kind + " 로 묶기는 지원하지 않아요");
   return deliver(blob, out);
+}
+
+// ───────── ①-2 사진 형식 바꾸기 ─────────
+const IMG_MIME = { jpg: "image/jpeg", png: "image/png", webp: "image/webp" };
+async function convertImages(items, fmt) {
+  const outs = [];
+  for (const [i, f] of items.entries()) {
+    progress(i, items.length, "사진 바꾸는 중…");
+    const bmp = await createImageBitmap(f.file, { imageOrientation: "from-image" });
+    const c = new OffscreenCanvas(bmp.width, bmp.height);
+    const g = c.getContext("2d");
+    if (fmt === "jpg") { g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); }   // JPG는 투명 배경을 흰색으로
+    g.drawImage(bmp, 0, 0); bmp.close();
+    const blob = await c.convertToBlob({ type: IMG_MIME[fmt], quality: fmt === "png" ? undefined : 0.92 });
+    if (blob.type !== IMG_MIME[fmt]) throw new Error(`이 브라우저는 ${fmt.toUpperCase()} 저장을 지원하지 않아요`);
+    outs.push({ blob, name: f.name.replace(/\.[^.]+$/, "") + "." + fmt });
+  }
+  progress(items.length, items.length, "사진 바꾸는 중…");
+  if (outs.length <= 3) outs.forEach((o) => deliver(o.blob, o.name));
+  else {
+    const z = new JSZip();
+    const used = new Set();
+    for (const o of outs) { let n = o.name, k = 1; while (used.has(n)) n = o.name.replace(/(\.\w+)$/, ` (${k++})$1`); used.add(n); z.file(n, o.blob); }
+    deliver(await z.generateAsync({ type: "blob" }), `사진_${fmt}.zip`);
+  }
+  return outs.length;
 }
 
 // ───────── ② PDF → 이미지 ─────────
@@ -339,7 +377,7 @@ async function convert(items, target) {
 // ───────── ④ 글자 추출 (온라인) ─────────
 async function relay(path, body, timeout = 120000) {
   const url = relayUrl();
-  if (!url) throw new Error("AI 서버 주소가 없어요 (오른쪽 위 'AI 서버')");
+  if (!url) throw new Error("AI가 연결되지 않았어요 (⚙ 설정)");
   const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), timeout);
   try {
     const r = await fetch(url + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: ctl.signal });
@@ -348,7 +386,7 @@ async function relay(path, body, timeout = 120000) {
     return data;
   } catch (e) {
     if (e.name === "AbortError") throw new Error("서버 응답이 너무 늦어요");
-    if (e instanceof TypeError) throw new Error("AI 서버에 연결할 수 없어요 (인터넷 확인)");
+    if (e instanceof TypeError) throw new Error("AI에 연결할 수 없어요 (인터넷 확인)");
     throw e;
   } finally { clearTimeout(t); }
 }
@@ -388,20 +426,20 @@ const pick = (k) => state.files.filter((f) => (Array.isArray(k) ? k.includes(f.k
 async function run(label, fn) {
   if (state.busy) return;
   busy(true, label);
-  try { const r = await fn(); busy(false); msg(typeof r === "string" ? r : "✓ 완료! 아래에서 받을 수 있어요.", "ok"); }
+  try { const r = await fn(); busy(false); msg(typeof r === "string" ? r : "✓ 다 됐어요! 아래에서 다시 받을 수 있어요.", "ok"); }
   catch (e) { console.error(e); busy(false); msg("✗ " + (e.message || e), "err"); }
 }
 
-function ask(title, body) {
+function ask(title, body, sub = "") {
   const d = $("#confirmDlg");
-  $("#cfTitle").textContent = title; $("#cfBody").textContent = body;
+  $("#cfTitle").textContent = title; $("#cfBody").textContent = body; $("#cfSub").textContent = sub;
   d.returnValue = "";
   d.showModal();
   return new Promise((res) => d.addEventListener("close", () => res(d.returnValue === "yes"), { once: true }));
 }
 async function ocrConsent() {
   if (store.get("ocrOk")) return true;
-  const ok = await ask("온라인 전송 안내", "글자 추출은 사진·PDF 내용을 AI 서버(Claude)로 보내서 읽어요.\n개인정보가 있는 문서는 주의해주세요.");
+  const ok = await ask("사진을 AI로 보낼게요", "글자를 읽으려고 사진·PDF 내용을 AI(Claude)로 보내요.\n주민번호 같은 개인정보가 있는 문서는 주의해주세요.", "처음 한 번만 물어봐요");
   if (ok) store.set("ocrOk", "1");
   return ok;
 }
@@ -410,6 +448,11 @@ document.querySelectorAll("[data-bundle]").forEach((b) => (b.onclick = () => {
   const kind = b.dataset.bundle;
   run(`이미지를 ${b.textContent}로 묶는 중…`, async () => { await bundle(pick("image"), `${outName()}.${kind}`, opts()); return `✓ 이미지 ${pick("image").length}장을 ${kind.toUpperCase()}로 묶었어요.`; });
 }));
+document.querySelectorAll("[data-imgconv]").forEach((b) => (b.onclick = () => {
+  const fmt = b.dataset.imgconv;
+  run("사진 바꾸는 중…", async () => `✓ 사진 ${await convertImages(pick("image"), fmt)}장을 ${fmt.toUpperCase()}로 바꿨어요.`);
+}));
+document.querySelectorAll("#examples button").forEach((b) => (b.onclick = () => { $("#ask").value = b.textContent; $("#ask").focus(); }));
 $("#convBtn").onclick = () => run("변환 중…", async () => {
   const { done, errs } = await convert(pick("doc"), $("#target").value);
   return errs.length ? `✓ ${done}개 변환 · 실패 ${errs.length}개: ${errs[0]}` : `✓ 문서 ${done}개를 바꿨어요.`;
@@ -427,19 +470,19 @@ $("#askForm").addEventListener("submit", async (e) => {
   if (!text || !state.files.length || state.busy) return;
   const names = state.files.map((f) => f.name);
   const online = state.aiOnline;
-  busy(true, online ? "AI가 요청을 해석하는 중…" : "요청 해석 중…");
+  busy(true, online ? "AI가 문장을 읽는 중…" : "문장 읽는 중…");
   let plan, who;
   try {
     try {
       if (!online) throw new Error("offline");
       const { plan: p } = await relay("/plan", { text, files: names }, 30000);
-      plan = check(fixPlan(p, text, names), names, { online }); who = "온라인 AI";
+      plan = check(fixPlan(p, text, names), names, { online }); who = "AI가 이해한 내용";
     } catch {
-      plan = check(rulesPlan(text, names, { online }), names, { online }); who = "규칙";
+      plan = check(rulesPlan(text, names, { online }), names, { online }); who = "문장에서 찾은 내용";
     }
   } catch (err) { busy(false); return msg("✗ " + err.message, "err"); }
   busy(false);
-  if (!(await ask(`작업 확인 · ${who}`, describe(plan)))) return msg("취소했어요.");
+  if (!(await ask("이렇게 할까요?", describe(plan), who))) return msg("취소했어요.");
   const byName = (n) => state.files.find((f) => f.name === n);
   let items = plan.files.map(byName);
   if (plan.action === "bundle") {
@@ -448,6 +491,7 @@ $("#askForm").addEventListener("submit", async (e) => {
     return run("묶는 중…", async () => { await bundle(items, plan.out, { sort, quality: plan.quality || "normal", perPage: +plan.per_page || 1 }); return `✓ ${plan.out} 완성!`; });
   }
   if (plan.action === "convert") return run("변환 중…", async () => { const { done } = await convert(items, plan.target); return `✓ 문서 ${done}개를 바꿨어요.`; });
+  if (plan.action === "imgconv") return run("사진 바꾸는 중…", async () => `✓ 사진 ${await convertImages(items, plan.target)}장을 ${plan.target.toUpperCase()}로 바꿨어요.`);
   if (plan.action === "split") return run("PDF 쪼개는 중…", async () => { await split(items); return "✓ 페이지별 이미지를 ZIP으로 만들었어요."; });
   if (plan.action === "ocr") {
     if (!(await ocrConsent())) return msg("취소했어요.");
@@ -455,19 +499,20 @@ $("#askForm").addEventListener("submit", async (e) => {
   }
 });
 
-// ───────── AI 서버 연결 ─────────
+// ───────── AI 연결 ─────────
 async function checkAi() {
   const chip = $("#aiChip");
+  const set = (text, cls, tip) => { chip.textContent = text; chip.className = "ai " + cls; chip.title = tip; };
   state.aiOnline = false;
   const url = relayUrl();
-  if (!url) { chip.textContent = "규칙 모드"; chip.className = "chip"; chip.title = "AI 서버 주소가 없어서 키워드로 알아들어요"; return refresh(); }
-  chip.textContent = "서버 확인 중…"; chip.className = "chip";
+  if (!url) { set("AI 꺼짐", "", "AI 없이도 모든 버튼은 쓸 수 있어요. ⚙ 설정에서 AI를 연결하면 글로 시키기가 똑똑해지고 글자 뽑기를 쓸 수 있어요."); return refresh(); }
+  set("AI 확인 중…", "", "");
   try {
     const r = await fetch(url + "/health", { signal: AbortSignal.timeout(5000) });
     state.aiOnline = !!(await r.json()).ai;
   } catch { /* 연결 실패 */ }
-  chip.textContent = state.aiOnline ? "● 온라인 AI" : "서버 연결 안 됨 · 규칙 모드";
-  chip.className = state.aiOnline ? "chip on" : "chip";
+  if (state.aiOnline) set("AI 켜짐", "on", "글로 시키기와 글자 뽑기에 AI(Claude)를 써요.");
+  else set("AI 연결 안 됨", "warn", "AI에 연결할 수 없어요. 인터넷이나 ⚙ 설정의 주소를 확인해주세요. 다른 기능은 그대로 쓸 수 있어요.");
   refresh();
 }
 $("#serverBtn").onclick = () => {

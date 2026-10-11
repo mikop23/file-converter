@@ -22,7 +22,9 @@ const PLAN_SYSTEM = `너는 파일 변환 도우미다. 사용자 요청을 아�
    {"action":"split","files":["스캔.pdf"],"format":"jpg"|"png"}
 4) "ocr": 사진/스캔 PDF 속 글자를 뽑아 문서로. target은 docx/txt/md 중 하나.
    {"action":"ocr","files":["영수증.jpg"],"target":"docx"}
-5) "unknown": 위로 처리 못하는 요청. {"action":"unknown","reason":"..."}
+5) "imgconv": 사진을 다른 사진 형식으로 (한 장씩). target은 jpg/png/webp 중 하나.
+   {"action":"imgconv","files":["*.png"],"target":"jpg"}
+6) "unknown": 위로 처리 못하는 요청. {"action":"unknown","reason":"..."}
 
 규칙:
 - files에는 '폴더 파일 목록'에 있는 이름이나 와일드카드(*.jpg)만 쓴다.

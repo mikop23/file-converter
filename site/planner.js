@@ -8,10 +8,12 @@ const FORMAT_WORDS = [
   ["워드", "docx"], ["word", "docx"], ["docx", "docx"],
   ["압축파일", "zip"], ["압축 파일", "zip"], ["집파일", "zip"], ["zip", "zip"],
   ["피디에프", "pdf"], ["pdf", "pdf"],
+  ["제이피지", "jpg"], ["제이펙", "jpg"], ["jpeg", "jpg"], ["jpg", "jpg"], ["피엔지", "png"], ["png", "png"], ["웹피", "webp"], ["webp", "webp"],
   ["마크다운", "md"], ["텍스트", "txt"], ["메모장", "txt"], ["txt", "txt"], ["html", "html"], ["웹페이지", "html"],
 ];
 const SPLIT_WORDS = ["쪼개", "나눠", "나누", "분리", "페이지별", "장별"];
 const OCR_WORDS = ["글자", "텍스트로", "타이핑", "ocr", "받아적", "받아 적", "글씨"];
+const IMG_FMT = ["jpg", "png", "webp"];
 const BUNDLE_WORDS = ["묶", "합쳐", "합치", "모아", "하나로"];
 
 export const ext = (name) => (name.match(/\.([^.]+)$/)?.[1] || "").toLowerCase();
@@ -53,6 +55,14 @@ export function rulesPlan(text, files, { online = false } = {}) {
     return { action: "ocr", files: nm.length ? nm : files.filter((f) => isImg(f) || isPdf(f)),
              target: ["txt", "md"].includes(h.fmt) ? h.fmt : "docx" };
   }
+  const nmImg = nm.filter(isImg), nmPdf = nm.filter(isPdf);
+  const saysPdf = /pdf|피디에프/i.test(text);
+  if (IMG_FMT.includes(h.fmt) && files.some(isPdf) && (nmPdf.length || saysPdf || !files.some(isImg))) {   // "PDF를 jpg로" → 쪼개기
+    return { action: "split", files: nmPdf.length ? nmPdf : files.filter(isPdf).slice(0, 1), format: "jpg" };
+  }
+  if (IMG_FMT.includes(h.fmt) && files.some(isImg) && !h.bundle) {                                    // "사진 png로 바꿔"
+    return { action: "imgconv", files: nmImg.length ? nmImg : IMG_GLOBS, target: h.fmt };
+  }
   if (h.split && files.some(isPdf)) {
     return { action: "split", files: nm.filter(isPdf).length ? nm.filter(isPdf) : files.filter(isPdf).slice(0, 1), format: "jpg" };
   }
@@ -78,6 +88,9 @@ export function fixPlan(plan, text, files) {
     if (h.time) plan.sort = "time";
     if (h.small) plan.quality = "small";
     if (h.hq) plan.quality = "hq";
+  } else if ((plan.action === "convert" || plan.action === "imgconv") && IMG_FMT.includes(h.fmt) && files.some(isImg)) {
+    plan.action = "imgconv"; plan.target = h.fmt;
+    if (!(plan.files || []).some((f) => isImg(f) || /[*?]/.test(f))) plan.files = IMG_GLOBS;
   } else if (plan.action === "convert" && h.fmt) {
     plan.target = h.fmt;
   } else if (plan.action === "ocr" && ["docx", "txt", "md"].includes(h.fmt)) {
@@ -88,7 +101,7 @@ export function fixPlan(plan, text, files) {
 
 /** 계획 검사: 목록에 없는 파일·이상한 형식 거르기. 문제 있으면 Error */
 export function check(plan, files, { online = false } = {}) {
-  const ok = ["bundle", "convert", "split", ...(online ? ["ocr"] : [])];
+  const ok = ["bundle", "convert", "split", "imgconv", ...(online ? ["ocr"] : [])];
   if (!ok.includes(plan.action)) throw new Error(plan.reason || "처리할 수 없는 요청이에요");
   const real = [];
   for (const p of plan.files || []) {
@@ -112,6 +125,12 @@ export function check(plan, files, { online = false } = {}) {
     plan.files = real.filter((f) => DOC_EXT.includes(ext(f)) && ext(f) !== plan.target);
     if (!plan.files.length) throw new Error("바꿀 문서가 없어요 (md·html·txt·docx만 가능)");
   }
+  if (plan.action === "imgconv") {
+    plan.target = String(plan.target || "").toLowerCase().replace("jpeg", "jpg");
+    if (!IMG_FMT.includes(plan.target)) throw new Error("사진은 JPG·PNG·WEBP로 바꿀 수 있어요");
+    plan.files = real.filter((f) => isImg(f) && ext(f).replace("jpeg", "jpg") !== plan.target);
+    if (!plan.files.length) throw new Error(`이미 전부 ${plan.target.toUpperCase()}예요`);
+  }
   if (plan.action === "split") {
     plan.files = real.filter(isPdf);
     if (!plan.files.length) throw new Error("쪼갤 PDF가 없어요");
@@ -133,9 +152,10 @@ export function describe(p) {
     if ((p.per_page || 1) > 1) extra.push(`한 쪽에 ${p.per_page}장`);
     if (p.quality === "small") extra.push("용량 작게");
     if (p.quality === "hq") extra.push("고화질");
-    return `이미지 ${n}장 (${head})\n→ ${p.out}` + (extra.length ? `\n[${extra.join(", ")}]` : "");
+    return `사진 ${n}장 (${head})\n→ ${p.out} 한 파일로 합치기` + (extra.length ? `\n[${extra.join(", ")}]` : "");
   }
-  if (p.action === "convert") return `${head}\n→ ${p.target}로 변환`;
-  if (p.action === "ocr") return `${head}\n→ 글자 뽑아서 ${p.target} 문서로 (온라인 AI로 전송)`;
-  return `${head}\n→ 페이지별 이미지 (ZIP)`;
+  if (p.action === "convert") return `문서 ${n}개 (${head})\n→ ${{ docx: "Word 문서", md: "마크다운", html: "웹페이지", txt: "텍스트" }[p.target] || p.target}로 바꾸기`;
+  if (p.action === "imgconv") return `사진 ${n}장 (${head})\n→ ${p.target.toUpperCase()}로 바꾸기` + (n > 3 ? " (ZIP 하나로)" : "");
+  if (p.action === "ocr") return `${head}\n→ 글자를 뽑아서 ${{ docx: "Word 문서", txt: "텍스트", md: "마크다운" }[p.target]}로 (AI로 전송)`;
+  return `${head}\n→ 페이지별 사진 (ZIP)`;
 }

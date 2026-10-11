@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>파일 변환기</title>
-<meta name="description" content="사진 묶기, 문서 변환, PDF 쪼개기를 브라우저 안에서. 파일은 서버로 올라가지 않아요.">
+<meta name="description" content="사진 합치기, 사진·문서 형식 바꾸기, PDF를 사진으로. 파일은 내 기기 밖으로 나가지 않아요.">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <style>
-/* 레이아웃: 왼쪽 파일 트레이(넓게) + 오른쪽 작업 패널(고정폭), 폰에서는 위아래로 */
+/* 레이아웃: 1 파일 넣기(왼쪽) → 2 할 일 고르기(오른쪽 카드들) → 3 받기(아래). 폰에서는 위에서 아래로 */
 :root {
   --bg: #f3f5f8;
   --surface: #ffffff;
@@ -23,7 +23,7 @@
   --err-soft: #fde7e5;
   --font: "Pretendard Variable", Pretendard, "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
   --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  --r: 10px;
+  --r: 12px;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -42,60 +42,84 @@
 html, body { margin: 0; }
 body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--font); -webkit-font-smoothing: antialiased; }
 button, input, select { font: inherit; color: inherit; }
-.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 16px; padding-block: 18px 40px; display: grid; gap: 14px; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 40px; display: grid; gap: 16px; }
 
 header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-header h1 { font-size: 20px; font-weight: 750; letter-spacing: -0.02em; margin: 0; margin-right: auto; }
-header h1 small { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 8px; letter-spacing: 0; }
-.chip { font-size: 12.5px; padding: 4px 10px; border-radius: 99px; background: var(--line); color: var(--muted); white-space: nowrap; }
-.chip.on { background: var(--ok-soft); color: var(--ok); }
+header .brand { margin-right: auto; display: grid; }
+header h1 { font-size: 22px; font-weight: 750; letter-spacing: -0.02em; margin: 0; }
+header p { margin: 0; color: var(--muted); font-size: 13.5px; }
+.ai { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 5px 11px; border-radius: 99px; background: var(--line); color: var(--muted); white-space: nowrap; }
+.ai::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .6; }
+.ai.on { background: var(--ok-soft); color: var(--ok); }
+.ai.on::before { opacity: 1; }
+.ai.warn { background: var(--err-soft); color: var(--err); }
 
-.main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 14px; align-items: start; }
-@media (max-width: 860px) { .main { grid-template-columns: minmax(0, 1fr); } }
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .main { grid-template-columns: minmax(0, 1fr); } }
+.step { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; font-size: 15px; font-weight: 700; }
+.step b { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--fg); color: var(--bg); font-size: 12.5px; flex: none; }
+.step span { color: var(--muted); font-weight: 500; font-size: 13px; }
 
-/* 파일 트레이 */
-.tray { display: grid; gap: 10px; min-width: 0; }
-#drop { position: relative; min-height: 360px; background: var(--surface); border: 2px dashed var(--line-strong); border-radius: var(--r); padding: 8px; transition: border-color .15s, background .15s; }
-#drop.has { border-style: solid; border-width: 1px; border-color: var(--line); }
+/* 1. 파일 */
+.tray { min-width: 0; }
+@media (min-width: 901px) { .tray { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); } }
+#drop { position: relative; min-height: 380px; background: var(--surface); border: 2px dashed var(--line-strong); border-radius: var(--r); padding: 8px; transition: border-color .15s, background .15s; }
+#drop.has { border-style: solid; border-width: 1px; border-color: var(--line); min-height: 200px; }
 #drop.over { border-color: var(--accent); background: var(--accent-soft); }
-.empty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 6px; color: var(--muted); padding: 16px; }
-.empty b { color: var(--fg); font-size: 16px; font-weight: 650; }
-.empty .types { font-family: var(--mono); font-size: 12px; letter-spacing: .02em; }
+.empty { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; text-align: center; gap: 10px; color: var(--muted); padding: 16px; }
+.empty b { color: var(--fg); font-size: 17px; font-weight: 650; }
+.empty .kinds { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.empty .kinds span { font-size: 12.5px; padding: 3px 9px; border-radius: 99px; background: var(--bg); }
 #list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-#list li { display: grid; grid-template-columns: 22px 46px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 7px; cursor: grab; }
+#list li { display: grid; grid-template-columns: 22px 44px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 5px 6px; border-radius: 8px; cursor: grab; }
 #list li:hover { background: var(--bg); }
 #list li.dragging { opacity: .4; }
 #list li.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
 .idx { font: 12px var(--mono); color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
-.thumb { width: 46px; height: 46px; border-radius: 6px; object-fit: cover; background: var(--bg); display: grid; place-items: center; font: 600 10.5px var(--mono); color: var(--muted); text-transform: uppercase; border: 1px solid var(--line); }
+.thumb { width: 44px; height: 44px; border-radius: 6px; object-fit: cover; background: var(--bg); display: grid; place-items: center; font: 600 10.5px var(--mono); color: var(--muted); text-transform: uppercase; border: 1px solid var(--line); }
 .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fsize { font: 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
-.rm { border: 0; background: none; color: var(--muted); width: 28px; height: 28px; border-radius: 6px; cursor: pointer; font-size: 18px; line-height: 1; }
+.rm { border: 0; background: none; color: var(--muted); width: 30px; height: 30px; border-radius: 6px; cursor: pointer; font-size: 18px; line-height: 1; }
 .rm:hover { background: var(--err-soft); color: var(--err); }
-.trayrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.trayrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
 .trayrow .count { margin-left: auto; color: var(--muted); font-size: 13px; }
+.tip { margin: 8px 2px 0; color: var(--muted); font-size: 12.5px; }
 
-/* 작업 패널 */
-.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 18px; min-width: 0; }
-.sec { display: grid; gap: 8px; }
-.sec h2 { margin: 0; font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: .06em; }
-.sec h2 .tag { font-weight: 600; letter-spacing: 0; color: var(--accent); margin-left: 4px; }
-.row { display: flex; gap: 6px; }
-.row > :first-child { flex: 1; min-width: 0; }
-.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-.opts { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; font-size: 14px; }
-.btn, select, input[type=text], input[type=url] { height: 38px; border: 1px solid var(--line-strong); background: var(--surface); border-radius: 8px; padding: 0 12px; min-width: 0; }
-.btn { cursor: pointer; font-weight: 600; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; }
+/* 2. 할 일 카드 */
+.tasks { display: grid; gap: 10px; min-width: 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; display: grid; gap: 10px; min-width: 0; }
+.card.off { background: transparent; border-style: dashed; }
+.card.off h3, .card.off .desc { color: var(--muted); }
+.card h3 { margin: 0; font-size: 15.5px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+.card h3 .badge { font-size: 11.5px; font-weight: 650; padding: 1px 7px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
+.card .desc { margin: -6px 0 0; font-size: 13px; color: var(--muted); }
+.why { margin: 0; font-size: 12.5px; color: var(--muted); }
+.why::before { content: "ⓘ "; }
+.row { display: flex; gap: 6px; flex-wrap: wrap; }
+.row > .grow { flex: 1 1 160px; min-width: 0; }
+.choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 6px; }
+.btn, select, input[type=text], input[type=url] { height: 40px; border: 1px solid var(--line-strong); background: var(--surface); border-radius: 9px; padding: 0 12px; min-width: 0; }
+.btn { cursor: pointer; font-weight: 600; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.primary:hover:not(:disabled) { color: #fff; filter: brightness(1.08); }
 .btn.ghost { border-color: transparent; background: none; font-weight: 500; }
+.btn small { font-weight: 500; opacity: .7; font-size: 12px; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.note { font-size: 12.5px; color: var(--muted); margin: 0; }
+.examples { display: flex; flex-wrap: wrap; gap: 6px; }
+.examples button { border: 1px solid var(--line); background: var(--bg); border-radius: 99px; padding: 4px 11px; font-size: 12.5px; cursor: pointer; color: var(--muted); }
+.examples button:hover { color: var(--accent); border-color: var(--accent); }
+details.more { font-size: 13.5px; }
+details.more summary { cursor: pointer; color: var(--muted); list-style: none; }
+details.more summary::-webkit-details-marker { display: none; }
+details.more summary::before { content: "▸ "; }
+details.more[open] summary::before { content: "▾ "; }
+.opts { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; margin-top: 8px; }
+.opts select, .opts input { height: 36px; }
 
-/* 상태 + 결과 */
-.status { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; display: grid; gap: 10px; }
+/* 3. 받기 */
+.status { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; display: grid; gap: 10px; }
 #msg { margin: 0; min-height: 1.5em; }
 #msg.ok { color: var(--ok); } #msg.err { color: var(--err); }
 .bar { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
@@ -104,18 +128,19 @@ header h1 small { font-size: 13px; font-weight: 500; color: var(--muted); margin
 @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
 @media (prefers-reduced-motion: reduce) { .bar i { animation: none; width: 100%; opacity: .5; } }
 #results { display: flex; flex-wrap: wrap; gap: 6px; }
-#results a { display: inline-flex; gap: 8px; align-items: center; padding: 6px 10px; border-radius: 8px; background: var(--ok-soft); color: var(--ok); text-decoration: none; font-weight: 600; font-size: 13.5px; max-width: 100%; }
+#results a { display: inline-flex; gap: 8px; align-items: center; padding: 7px 11px; border-radius: 9px; background: var(--ok-soft); color: var(--ok); text-decoration: none; font-weight: 600; font-size: 13.5px; max-width: 100%; }
 #results a span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #results a small { font: 12px var(--mono); opacity: .8; }
 
-/* 확인 창 */
-dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--fg); padding: 20px; width: min(440px, calc(100vw - 32px)); }
+dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--fg); padding: 22px; width: min(460px, calc(100vw - 32px)); }
 dialog::backdrop { background: rgb(10 14 20 / .45); }
-dialog h3 { margin: 0 0 8px; font-size: 16px; }
-dialog p { margin: 0 0 16px; white-space: pre-line; color: var(--fg); }
-dialog .who { font: 12px var(--mono); color: var(--accent); }
-dialog .acts { display: flex; justify-content: flex-end; gap: 8px; }
+dialog h3 { margin: 0 0 4px; font-size: 17px; }
+dialog .sub { margin: 0 0 14px; font-size: 12.5px; color: var(--accent); }
+dialog p { margin: 0 0 16px; white-space: pre-line; }
+dialog .note { color: var(--muted); font-size: 13.5px; }
+dialog label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
 dialog input { width: 100%; margin-bottom: 16px; }
+dialog .acts { display: flex; justify-content: flex-end; gap: 8px; }
 footer { color: var(--muted); font-size: 12.5px; text-align: center; }
 footer a { color: inherit; }
 </style>
@@ -123,103 +148,142 @@ footer a { color: inherit; }
 <body>
 <div class="wrap">
   <header>
-    <h1>파일 변환기<small>브라우저 안에서 처리 · 파일은 서버로 안 올라가요</small></h1>
-    <span id="aiChip" class="chip">규칙 모드</span>
-    <button id="serverBtn" class="btn ghost" type="button">AI 서버</button>
+    <div class="brand">
+      <h1>파일 변환기</h1>
+      <p>사진·문서·PDF를 원하는 형식으로. 파일은 내 기기 밖으로 나가지 않아요.</p>
+    </div>
+    <span id="aiChip" class="ai" title="">AI 꺼짐</span>
+    <button id="serverBtn" class="btn ghost" type="button">⚙ 설정</button>
   </header>
 
   <div class="main">
-    <section class="tray" aria-label="파일 목록">
+    <section class="tray" aria-labelledby="s1">
+      <h2 class="step" id="s1"><b>1</b>파일 넣기</h2>
       <div id="drop">
         <div class="empty" id="empty">
           <b>여기에 파일을 끌어다 놓으세요</b>
-          <span>또는 아래 '파일 추가'를 눌러 고르기</span>
-          <span class="types">jpg · png · webp · pdf · md · html · txt · docx</span>
+          <span>폰에서는 아래 '파일 고르기'를 누르세요</span>
+          <div class="kinds"><span>사진 jpg·png·webp</span><span>PDF</span><span>Word·마크다운·웹페이지·텍스트</span></div>
         </div>
         <ol id="list"></ol>
       </div>
       <div class="trayrow">
-        <label class="btn" for="pick">+ 파일 추가</label>
+        <label class="btn primary" for="pick">+ 파일 고르기</label>
         <input id="pick" type="file" multiple hidden accept="image/*,.pdf,.md,.markdown,.html,.htm,.txt,.docx">
-        <button id="clear" class="btn ghost" type="button">비우기</button>
+        <button id="clear" class="btn ghost" type="button">모두 빼기</button>
         <span id="count" class="count"></span>
       </div>
+      <p class="tip" id="trayTip" hidden>줄을 끌어서 순서를 바꿀 수 있어요. 사진을 합칠 때 이 순서대로 들어가요.</p>
     </section>
 
-    <aside class="panel" aria-label="작업">
-      <div class="sec">
-        <h2>말로 시키기</h2>
+    <section class="tasks" aria-labelledby="s2">
+      <h2 class="step" id="s2"><b>2</b>할 일 고르기<span>버튼만 누르면 바로 만들어져요</span></h2>
+
+      <div class="card" id="cardAsk">
+        <h3>글로 시키기</h3>
+        <p class="desc">하고 싶은 걸 문장으로 쓰면 알아서 골라서 해줘요.</p>
         <form class="row" id="askForm">
-          <input id="ask" type="text" placeholder="예: 사진 시간순으로 PDF로 묶어줘" autocomplete="off">
-          <button class="btn primary" id="askBtn" type="submit">실행</button>
+          <input class="grow" id="ask" type="text" placeholder="예: 사진 찍은 순서대로 PDF로 합쳐줘" autocomplete="off">
+          <button class="btn primary" id="askBtn" type="submit">하기</button>
         </form>
+        <div class="examples" id="examples">
+          <button type="button">사진 PDF로 합쳐줘</button>
+          <button type="button">사진 png로 바꿔줘</button>
+          <button type="button">문서 워드로 바꿔줘</button>
+          <button type="button">PDF 사진으로 쪼개줘</button>
+        </div>
+        <p class="why" id="askWhy"></p>
       </div>
 
-      <div class="sec">
-        <h2>이미지 묶기</h2>
-        <div class="grid4">
+      <div class="card" id="cardBundle">
+        <h3>사진 한 파일로 합치기</h3>
+        <p class="desc">여러 장의 사진을 PDF·Word·PPT·ZIP 하나로 만들어요.</p>
+        <div class="choices">
           <button class="btn" data-bundle="pdf" type="button">PDF</button>
           <button class="btn" data-bundle="docx" type="button">Word</button>
           <button class="btn" data-bundle="pptx" type="button">PPT</button>
           <button class="btn" data-bundle="zip" type="button">ZIP</button>
         </div>
+        <details class="more">
+          <summary>순서 · 화질 · 파일 이름</summary>
+          <div class="opts">
+            <label for="sort">순서</label>
+            <select id="sort"><option value="none">목록에 보이는 순서</option><option value="name">파일 이름순</option><option value="time">사진 찍은 시간순</option></select>
+            <label for="quality">화질</label>
+            <select id="quality"><option value="normal">보통 (추천)</option><option value="small">용량 작게</option><option value="hq">원본 화질</option></select>
+            <label for="perPage">Word 한 쪽에</label>
+            <select id="perPage"><option value="1">사진 1장</option><option value="2">사진 2장</option><option value="3">사진 3장</option><option value="4">사진 4장</option><option value="6">사진 6장</option></select>
+            <label for="outName">파일 이름</label>
+            <input id="outName" type="text" value="묶음">
+          </div>
+        </details>
+        <p class="why" data-why="image">사진을 넣으면 쓸 수 있어요.</p>
       </div>
 
-      <div class="sec">
-        <h2>문서 변환 · PDF 쪼개기</h2>
-        <div class="row">
-          <select id="target" aria-label="바꿀 형식">
-            <option value="docx">docx (Word)</option>
-            <option value="md">md (마크다운)</option>
-            <option value="html">html</option>
-            <option value="txt">txt</option>
-          </select>
-          <button class="btn" id="convBtn" type="button">변환</button>
-          <button class="btn" id="splitBtn" type="button">PDF → 이미지</button>
+      <div class="card" id="cardImgConv">
+        <h3>사진 형식 바꾸기</h3>
+        <p class="desc">사진마다 원하는 형식으로 바꿔요. 크기와 화질은 그대로예요.</p>
+        <div class="choices">
+          <button class="btn" data-imgconv="jpg" type="button">JPG</button>
+          <button class="btn" data-imgconv="png" type="button">PNG</button>
+          <button class="btn" data-imgconv="webp" type="button">WEBP</button>
         </div>
+        <p class="why" data-why="image">사진을 넣으면 쓸 수 있어요.</p>
+        <p class="why" id="imgConvTip" hidden>4장 이상이면 ZIP 파일 하나로 받아요.</p>
       </div>
 
-      <div class="sec" id="ocrSec">
-        <h2>글자 추출<span class="tag">온라인 AI</span></h2>
+      <div class="card" id="cardConv">
+        <h3>문서 형식 바꾸기</h3>
+        <p class="desc">Word·마크다운·웹페이지·텍스트끼리 바꿔요. 제목과 표도 살려요.</p>
         <div class="row">
-          <select id="ocrTarget" aria-label="글자 추출 결과 형식">
-            <option value="docx">Word (docx)</option>
-            <option value="txt">텍스트 (txt)</option>
-            <option value="md">마크다운 (md)</option>
+          <select class="grow" id="target" aria-label="바꿀 형식">
+            <option value="docx">Word 문서 (.docx)</option>
+            <option value="md">마크다운 (.md)</option>
+            <option value="html">웹페이지 (.html)</option>
+            <option value="txt">텍스트 (.txt)</option>
+          </select>
+          <button class="btn" id="convBtn" type="button">바꾸기</button>
+        </div>
+        <p class="why" data-why="doc">Word·마크다운·웹페이지·텍스트 문서를 넣으면 쓸 수 있어요.</p>
+      </div>
+
+      <div class="card" id="cardSplit">
+        <h3>PDF를 사진으로</h3>
+        <p class="desc">PDF 한 쪽 한 쪽을 사진(JPG)으로 바꿔서 ZIP으로 줘요.</p>
+        <button class="btn" id="splitBtn" type="button">페이지별 사진으로 바꾸기</button>
+        <p class="why" data-why="pdf">PDF를 넣으면 쓸 수 있어요.</p>
+      </div>
+
+      <div class="card" id="ocrSec">
+        <h3>사진 속 글자 뽑기 <span class="badge">AI</span></h3>
+        <p class="desc">사진이나 스캔한 PDF의 글자를 읽어서 문서로 만들어요.</p>
+        <div class="row">
+          <select class="grow" id="ocrTarget" aria-label="글자 뽑기 결과 형식">
+            <option value="docx">Word 문서 (.docx)</option>
+            <option value="txt">텍스트 (.txt)</option>
+            <option value="md">마크다운 (.md)</option>
           </select>
           <button class="btn" id="ocrBtn" type="button">글자 뽑기</button>
         </div>
-        <p class="note" id="ocrNote">사진·스캔 PDF를 AI 서버로 보내서 읽어요.</p>
+        <p class="why" id="ocrNote"></p>
       </div>
-
-      <div class="sec">
-        <h2>옵션</h2>
-        <div class="opts">
-          <label for="sort">순서</label>
-          <select id="sort"><option value="none">목록 순서</option><option value="name">파일명순</option><option value="time">찍은 시간순</option></select>
-          <label for="quality">화질</label>
-          <select id="quality"><option value="normal">보통</option><option value="small">용량 작게</option><option value="hq">고화질</option></select>
-          <label for="perPage">Word 한 쪽에</label>
-          <select id="perPage"><option>1</option><option>2</option><option>3</option><option>4</option><option>6</option></select>
-          <label for="outName">결과 이름</label>
-          <input id="outName" type="text" value="묶음">
-        </div>
-      </div>
-    </aside>
+    </section>
   </div>
 
-  <section class="status" aria-live="polite">
-    <p id="msg">파일을 넣고 작업을 골라주세요.</p>
+  <section class="status" aria-labelledby="s3" aria-live="polite">
+    <h2 class="step" id="s3"><b>3</b>받기<span>만든 파일은 바로 다운로드되고, 여기서 다시 받을 수 있어요</span></h2>
+    <p id="msg">파일을 넣고 할 일을 골라주세요.</p>
     <div class="bar" id="bar" hidden><i></i></div>
     <div id="results"></div>
   </section>
 
-  <footer>Word·PPT → PDF, PDF → Word는 <a href="https://github.com/mikop23/file-converter">PC 프로그램</a>에서 할 수 있어요.</footer>
+  <footer>Word·PPT·엑셀을 PDF로, PDF를 Word로 바꾸기는 <a href="https://github.com/mikop23/file-converter">PC 프로그램</a>에서 할 수 있어요.</footer>
 </div>
 
 <dialog id="confirmDlg">
   <form method="dialog">
-    <h3 id="cfTitle">작업 확인</h3>
+    <h3 id="cfTitle">이렇게 할까요?</h3>
+    <p class="sub" id="cfSub"></p>
     <p id="cfBody"></p>
     <div class="acts"><button class="btn" value="no">취소</button><button class="btn primary" value="yes">진행</button></div>
   </form>
@@ -227,8 +291,9 @@ footer a { color: inherit; }
 
 <dialog id="serverDlg">
   <form method="dialog">
-    <h3>AI 서버 주소</h3>
-    <p class="note">말 알아듣기와 글자 추출에 쓰는 중계 서버예요. 비워두면 규칙 모드로 동작해요.</p>
+    <h3>설정</h3>
+    <p class="note">AI를 연결하면 자유로운 문장도 알아듣고, 사진 속 글자도 뽑을 수 있어요. 연결하지 않아도 나머지 기능은 모두 쓸 수 있어요.</p>
+    <label for="serverUrl">AI 연결 주소 (선택)</label>
     <input id="serverUrl" type="url" placeholder="https://file-converter-relay.….workers.dev">
     <div class="acts"><button class="btn" value="no">취소</button><button class="btn primary" value="yes">저장</button></div>
   </form>
