@@ -19,7 +19,9 @@ from PySide6.QtWidgets import (
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fconv, fai, localai, relay
 
-ONLINE = relay.edition() == "online"
+def ai_pref():
+    """설정에서 고른 AI 방식: 'local'(내 PC에서) | 'online'(온라인 AI)"""
+    return relay.load_config().get("ai_pref", "local")
 
 DOC_EXT = {".md", ".docx", ".doc", ".html", ".htm", ".txt", ".odt", ".epub", ".rtf",
            ".pptx", ".ppt", ".xlsx", ".xls", ".pdf", ".hwp", ".rst", ".tex"}
@@ -50,9 +52,10 @@ QScrollArea { border: none; background: transparent; }
 #cardtitle { font-size: 15px; font-weight: 700; }
 #card[off="true"] #cardtitle, #card[off="true"] #desc { color: #8a93a3; }
 #badge { background: #e7eeff; color: #2456e6; border-radius: 8px; padding: 1px 7px; font-size: 11px; font-weight: 650; }
-#ai { border-radius: 11px; padding: 4px 11px; font-size: 12.5px; background: #dde2ea; color: #667085; }
-#ai[state="on"] { background: #dcf5e4; color: #157f3d; }
-#ai[state="warn"] { background: #fde7e5; color: #b42318; }
+QPushButton#ai { border: none; border-radius: 13px; padding: 0 12px; font-size: 12.5px; font-weight: 600; background: #dde2ea; color: #667085; }
+QPushButton#ai:hover { color: #1b2230; }
+QPushButton#ai[state="on"] { background: #dcf5e4; color: #157f3d; }
+QPushButton#ai[state="warn"] { background: #fde7e5; color: #b42318; }
 QListWidget { background: #ffffff; border: 2px dashed #c4ccd8; border-radius: 12px; padding: 6px; }
 QListWidget[filled="true"] { border: 1px solid #dde2ea; }
 QListWidget::item { border-radius: 7px; padding: 4px; }
@@ -263,7 +266,7 @@ class Card(QFrame):
 class Main(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("파일 변환기" + (" (온라인)" if ONLINE else ""))
+        self.setWindowTitle("파일 변환기")
         self.resize(1080, 760)
         self.out_dir = None          # None이면 원본 파일 폴더
         self.last_out = None
@@ -283,11 +286,13 @@ class Main(QMainWindow):
         top = QHBoxLayout()
         brand = QVBoxLayout(); brand.setSpacing(0)
         brand.addWidget(label("파일 변환기", "title"))
-        brand.addWidget(label("사진·문서·PDF를 원하는 형식으로. " +
-                              ("AI를 쓸 때만 인터넷을 써요." if ONLINE else "모든 작업이 이 PC 안에서 끝나요."), "sub"))
+        self.sub_lbl = label("", "sub")
+        brand.addWidget(self.sub_lbl)
         top.addLayout(brand)
         top.addStretch()
-        self.ai_chip = label("AI 확인 중…", "ai")
+        self.ai_chip = QPushButton("AI 확인 중…", objectName="ai")      # 누르면 설정 열림
+        self.ai_chip.setCursor(Qt.PointingHandCursor)
+        self.ai_chip.clicked.connect(self.open_settings)
         self.get_ai_btn = QPushButton(f"AI 켜기 ({localai.MODEL_SIZE_MB / 1000:.1f}GB 받기)")
         self.get_ai_btn.setVisible(False)
         self.get_ai_btn.clicked.connect(self.get_ai)
@@ -408,7 +413,7 @@ class Main(QMainWindow):
         self.c_split.finish()
         tv.addWidget(self.c_split)
 
-        # 사진 속 글자 뽑기 (온라인 버전만)
+        # 사진 속 글자 뽑기 (온라인 AI일 때만 켜짐)
         self.c_ocr = Card("사진 속 글자 뽑기", "사진이나 스캔한 PDF의 글자를 읽어서 문서로 만들어요.", badge="AI")
         orow = QHBoxLayout()
         self.ocr_target = QComboBox(); self.ocr_target.addItems([t for t, _ in OCR_TARGETS])
@@ -416,7 +421,6 @@ class Main(QMainWindow):
         orow.addWidget(self.ocr_target, 1); orow.addWidget(self.ocr_btn)
         self.c_ocr.add(orow)
         self.c_ocr.finish()
-        self.c_ocr.setVisible(ONLINE)
         tv.addWidget(self.c_ocr)
         tv.addStretch()
 
@@ -552,7 +556,8 @@ class Main(QMainWindow):
         ocr_ok = bool(img or pdf) and self.ai_mode == "online"
         self.ocr_btn.setEnabled(ocr_ok)
         self.c_ocr.set_state(ocr_ok, "사진 내용이 AI로 전송돼서 읽혀요." if ocr_ok
-                             else "⚙ 설정에서 AI를 연결하면 쓸 수 있어요." if not relay.server_url()
+                             else "⚙ 설정에서 '온라인 AI'를 고르면 쓸 수 있어요." if ai_pref() != "online"
+                             else "⚙ 설정에서 온라인 AI 주소를 넣어주세요." if not relay.server_url()
                              else "AI에 연결이 안 돼요. 인터넷을 확인해주세요." if self.ai_mode != "online"
                              else "사진이나 PDF를 넣으면 쓸 수 있어요.")
 
@@ -738,15 +743,19 @@ class Main(QMainWindow):
 
     def check_ai(self):
         self.get_ai_btn.setVisible(False)
-        if ONLINE:
+        online = ai_pref() == "online"
+        self.sub_lbl.setText("사진·문서·PDF를 원하는 형식으로. " +
+                             ("온라인 AI를 쓸 때만 인터넷을 써요." if online else "모든 작업이 이 PC 안에서 끝나요."))
+        if online:
+            self.server.stop()                         # 내 PC AI는 꺼서 메모리 아끼기
             self.set_chip("AI 확인 중…")
 
             def ok(alive):
                 self.ai_mode = "online" if alive else None
                 if alive:
-                    self.set_chip("AI 켜짐", "on", "글로 시키기와 글자 뽑기에 AI(Claude)를 써요.")
+                    self.set_chip("AI 켜짐 · 온라인", "on", "글로 시키기와 글자 뽑기에 온라인 AI(Claude)를 써요. 누르면 설정이 열려요.")
                 elif not relay.server_url():
-                    self.set_chip("AI 꺼짐", "", self.OFF_TIP + " ⚙ 설정에서 AI를 연결할 수 있어요.")
+                    self.set_chip("AI 꺼짐", "", self.OFF_TIP + " 온라인 AI 주소가 비어 있어요. 누르면 설정이 열려요.")
                 else:
                     self.set_chip("AI 연결 안 됨", "warn", "AI에 연결할 수 없어요. 인터넷이나 ⚙ 설정의 주소를 확인해주세요.")
             return self.background(relay.health, ok, "", block=False,
@@ -754,7 +763,7 @@ class Main(QMainWindow):
         self.models = fai.list_models()
         if self.models:
             self.ai_mode = "ollama"
-            return self.set_chip("AI 켜짐", "on", f"이 PC의 Ollama 모델을 써요 ({relay.load_config().get('ollama_model') or self.models[0]})")
+            return self.set_chip("AI 켜짐 · 내 PC", "on", f"이 PC의 Ollama 모델을 써요 ({relay.load_config().get('ollama_model') or self.models[0]}). 누르면 설정이 열려요.")
         self.ai_mode = None
         if not localai.available():
             return self.set_chip("AI 꺼짐", "", self.OFF_TIP)
@@ -766,7 +775,7 @@ class Main(QMainWindow):
     def start_builtin(self):
         if self.server.running():
             self.ai_mode = "builtin"
-            return self.set_chip("AI 켜짐", "on", "내장 AI · 인터넷 없이 이 PC에서 돌아가요")
+            return self.set_chip("AI 켜짐 · 내 PC", "on", "내장 AI · 인터넷 없이 이 PC에서 돌아가요. 누르면 설정이 열려요.")
         if self.starting:
             return
         self.starting = True
@@ -776,9 +785,9 @@ class Main(QMainWindow):
             self.starting = False
             if r:
                 self.ai_mode = "builtin"
-                self.set_chip("AI 켜짐", "on", "내장 AI · 인터넷 없이 이 PC에서 돌아가요")
+                self.set_chip("AI 켜짐 · 내 PC", "on", "내장 AI · 인터넷 없이 이 PC에서 돌아가요. 누르면 설정이 열려요.")
             else:
-                self.set_chip("AI 꺼짐", "", "내장 AI를 못 켰어요. ⚙ 설정에서 'AI 다시 확인'을 눌러보세요.")
+                self.set_chip("AI 꺼짐", "", "내장 AI를 못 켰어요. 여기를 눌러 설정을 저장하면 다시 시도해요.")
         self.background(self.server.start, ok, "", block=False,
                         on_fail=lambda m: (setattr(self, "starting", False), self.set_chip("AI 꺼짐", "", m)))
 
@@ -805,34 +814,49 @@ class Main(QMainWindow):
         self.background(localai.download_model, ok, "", on_fail=bad, block=False, on_progress=prog)
 
     def open_settings(self):
-        d = QDialog(self); d.setWindowTitle("설정"); d.setMinimumWidth(460)
-        v = QVBoxLayout(d); v.setSpacing(10)
-        v.addWidget(label("설정", "cardtitle"))
-        url = None
+        from PySide6.QtWidgets import QRadioButton, QButtonGroup
+        d = QDialog(self); d.setWindowTitle("설정"); d.setMinimumWidth(480)
+        v = QVBoxLayout(d); v.setSpacing(10); v.setContentsMargins(20, 18, 20, 16)
+        v.addWidget(label("AI 방식", "cardtitle"))
+        v.addWidget(label("글로 시키기를 알아듣는 AI를 어디서 돌릴지 골라요. AI가 꺼져 있어도 다른 버튼은 모두 쓸 수 있어요.",
+                          "desc", wrap=True))
+        r_local = QRadioButton("내 PC에서 (인터넷 없이)")
+        r_online = QRadioButton("온라인 AI (Claude)")
+        grp = QButtonGroup(d); grp.addButton(r_local); grp.addButton(r_online)
+        (r_online if ai_pref() == "online" else r_local).setChecked(True)
+
+        v.addWidget(r_local)
+        local_box = QWidget(); lv = QVBoxLayout(local_box); lv.setContentsMargins(24, 0, 0, 6); lv.setSpacing(6)
+        lv.addWidget(label("파일과 문장이 PC 밖으로 나가지 않아요. 처음 한 번 AI(1.1GB)를 받아야 해요.", "desc", wrap=True))
         model_box = None
-        if ONLINE:
-            v.addWidget(label("AI를 연결하면 자유로운 문장도 알아듣고, 사진 속 글자도 뽑을 수 있어요. "
-                              "연결하지 않아도 나머지 기능은 모두 쓸 수 있어요.", "desc", wrap=True))
-            v.addWidget(label("AI 연결 주소 (선택)"))
-            url = QLineEdit(relay.server_url()); url.setPlaceholderText("https://file-converter-relay.….workers.dev")
-            v.addWidget(url)
-        else:
-            v.addWidget(label("이 버전은 인터넷 없이 PC 안에서만 동작해요. AI도 PC 안에서 돌아가요.", "desc", wrap=True))
-            if self.models:
-                v.addWidget(label("사용할 AI 모델 (Ollama)"))
-                model_box = QComboBox(); model_box.addItems(self.models)
-                cur = relay.load_config().get("ollama_model")
-                if cur in self.models:
-                    model_box.setCurrentText(cur)
-                v.addWidget(model_box)
-        recheck = QPushButton("AI 다시 확인"); recheck.clicked.connect(lambda: (d.accept(), self.check_ai()))
-        v.addWidget(recheck)
-        bb = QDialogButtonBox(); bb.addButton("저장", QDialogButtonBox.AcceptRole); bb.addButton("취소", QDialogButtonBox.RejectRole)
+        if self.models:
+            lv.addWidget(label("사용할 모델 (이 PC의 Ollama)"))
+            model_box = QComboBox(); model_box.addItems(self.models)
+            cur = relay.load_config().get("ollama_model")
+            if cur in self.models:
+                model_box.setCurrentText(cur)
+            lv.addWidget(model_box)
+        v.addWidget(local_box)
+
+        v.addWidget(r_online)
+        online_box = QWidget(); ov = QVBoxLayout(online_box); ov.setContentsMargins(24, 0, 0, 6); ov.setSpacing(6)
+        ov.addWidget(label("더 똑똑하고, 사진 속 글자 뽑기도 쓸 수 있어요. AI를 쓸 때 문장·사진이 인터넷으로 전송돼요.",
+                           "desc", wrap=True))
+        ov.addWidget(label("온라인 AI 주소"))
+        url = QLineEdit(relay.server_url()); url.setPlaceholderText("https://file-converter-relay.….workers.dev")
+        ov.addWidget(url)
+        v.addWidget(online_box)
+
+        def sync():
+            local_box.setEnabled(r_local.isChecked()); online_box.setEnabled(r_online.isChecked())
+        r_local.toggled.connect(sync); sync()
+
+        bb = QDialogButtonBox()
+        bb.addButton("저장", QDialogButtonBox.AcceptRole); bb.addButton("취소", QDialogButtonBox.RejectRole)
         bb.accepted.connect(d.accept); bb.rejected.connect(d.reject)
         v.addWidget(bb)
         if d.exec() == QDialog.Accepted:
-            if url is not None:
-                relay.save_config(relay_url=url.text().strip())
+            relay.save_config(ai_pref="online" if r_online.isChecked() else "local", relay_url=url.text().strip())
             if model_box is not None:
                 relay.save_config(ollama_model=model_box.currentText())
             self.check_ai()

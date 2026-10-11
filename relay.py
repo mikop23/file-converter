@@ -1,6 +1,6 @@
 """
 온라인 AI - 중계 서버(server/worker.js)를 통해 Claude 사용
-  에디션/서버 주소: 프로그램 안의 edition.json → 사용자 설정(config.json) 순서로 결정
+  서버 주소: 사용자 설정(config.json) → 빌드할 때 넣은 기본값(edition.json) 순서로 결정
 """
 import base64, io, json, os, urllib.request
 from pathlib import Path
@@ -14,10 +14,6 @@ def _read_json(p):
         return json.loads(Path(p).read_text(encoding="utf-8"))
     except Exception:
         return {}
-
-def edition():
-    """'offline' | 'online'  (빌드할 때 edition.json에 적힘)"""
-    return os.environ.get("FCONV_EDITION") or _read_json(fconv.APP_DIR / "edition.json").get("edition", "offline")
 
 def config_path():
     base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~/.local/share")

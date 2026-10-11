@@ -2,22 +2,21 @@
 
 사진 묶기, 문서 변환, PDF 쪼개기를 한 번에. 말로 시켜도 돼요 ("사진 시간순으로 PDF로 묶어줘").
 
-| | 오프라인 앱 | 온라인 앱 | 사이트 |
-|---|---|---|---|
-| 설치 | exe (파이썬 필요 없음) | exe | 필요 없음 (브라우저) |
-| 인터넷 | 필요 없음 | AI·글자 추출에 필요 | 처음 접속할 때 |
-| AI | 내장 Qwen2.5 1.5B (처음 1.1GB 받기) | Claude (중계 서버) | Claude (중계 서버) 또는 규칙 |
-| 이미지 → PDF·Word·PPT·ZIP | ✓ | ✓ | ✓ |
-| md·html·txt·docx 변환 | ✓ | ✓ | ✓ |
-| Word·PPT·엑셀 → PDF | ✓ (MS 오피스/LibreOffice) | ✓ | – |
-| PDF → Word | ✓ | ✓ | – |
-| PDF → 이미지 | ✓ | ✓ | ✓ |
-| 사진·스캔 글자 추출 | – | ✓ | ✓ |
-| 파일이 밖으로 나가는지 | 안 나감 | AI 쓸 때 문장·글자 추출 파일만 | AI 쓸 때 문장·글자 추출 파일만 |
+| | PC 앱 | 사이트 |
+|---|---|---|
+| 설치 | exe 하나 (파이썬 필요 없음) | 필요 없음 (브라우저) |
+| AI | ⚙ 설정에서 고르기: **내 PC에서**(내장 Qwen2.5 1.5B, 인터넷 없이) / **온라인 AI**(Claude) | 온라인 AI 또는 AI 없이 |
+| 사진 → PDF·Word·PPT·ZIP 합치기 | ✓ | ✓ |
+| 사진 형식 바꾸기 (JPG·PNG·WEBP) | ✓ | ✓ |
+| md·html·txt·docx 변환 | ✓ | ✓ |
+| Word·PPT·엑셀 → PDF, PDF → Word | ✓ (MS 오피스/LibreOffice) | – |
+| PDF → 사진 | ✓ | ✓ |
+| 사진 속 글자 뽑기 | ✓ (온라인 AI) | ✓ (온라인 AI) |
+| 파일이 밖으로 나가는지 | 내 PC 방식이면 안 나감 | 온라인 AI 쓸 때 문장·글자 뽑기 사진만 |
 
 ## 받기
 
-- **앱**: [Actions](../../actions/workflows/build.yml) → 최근 성공한 빌드 → Artifacts에서 `FileConverter-offline-windows` 또는 `FileConverter-online-windows`
+- **앱**: [Actions](../../actions/workflows/build.yml) → 최근 성공한 빌드 → Artifacts에서 `FileConverter-windows`
 - **사이트**: `https://mikop23.github.io/file-converter/` (아래 1회 설정 후)
 
 ## 처음 한 번 설정
@@ -36,7 +35,7 @@ npx wrangler deploy                          # 끝나면 https://file-converter-
 ```
 
 ### 3. 서버 주소 연결
-저장소 **Settings → Secrets and variables → Actions → Variables**에 `RELAY_URL` = 위 주소 추가 → 다음 빌드부터 온라인 앱·사이트에 자동으로 들어감.
+저장소 **Settings → Secrets and variables → Actions → Variables**에 `RELAY_URL` = 위 주소 추가 → 다음 빌드부터 앱·사이트에 기본 주소로 들어감.
 (앱·사이트 모두 오른쪽 위 **⚙ 설정**에서 직접 넣어도 됨)
 
 ## 비용·안전
@@ -49,7 +48,7 @@ npx wrangler deploy                          # 끝나면 https://file-converter-
 app.py        PC 앱 화면 (PySide6)
 fconv.py      변환 엔진 (이미지 묶기, 문서 변환, PDF 쪼개기)
 fai.py        말 → 작업 계획 (AI + 규칙 보정)
-localai.py    오프라인 내장 AI (llama.cpp)
+localai.py    내 PC에서 돌리는 AI (llama.cpp)
 relay.py      온라인 AI·글자 추출 (중계 서버 호출)
 server/       중계 서버 (Cloudflare Worker)
 site/         사이트 (브라우저에서 변환)
