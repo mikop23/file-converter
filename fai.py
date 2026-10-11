@@ -68,7 +68,10 @@ FORMAT_WORDS = [  # 긴 단어 먼저 (피디에프 ⊃ 에프 같은 겹침 방
     ("피디에프", "pdf"), ("pdf", "pdf"),
     ("마크다운", "md"), ("텍스트", "txt"), ("txt", "txt"), ("html", "html"), ("웹페이지", "html"),
     ("epub", "epub"), ("odt", "odt"),
+    ("제이피지", "jpg"), ("제이펙", "jpg"), ("jpeg", "jpg"), ("jpg", "jpg"),
+    ("피엔지", "png"), ("png", "png"), ("웹피", "webp"), ("webp", "webp"),
 ]
+IMG_FMT = {"jpg", "png", "webp"}
 SPLIT_WORDS = ["쪼개", "나눠", "나누", "분리", "페이지별", "장별"]
 
 def hints(text, files):
@@ -117,6 +120,10 @@ def fix_plan(plan, text, files):
             plan.update(quality=60, max_size=1500)
         if h["hq"]:
             plan.update(quality=95, max_size=0)
+    elif act in ("convert", "imgconv") and h["fmt"] in IMG_FMT and has_img and not h["split"]:
+        plan["action"], plan["target"] = "imgconv", h["fmt"]
+        if not any(Path(f).suffix.lower() in fconv.IMG_EXT or any(c in f for c in "*?[") for f in plan.get("files") or []):
+            plan["files"] = IMG_GLOBS
     elif act == "convert" and h["fmt"]:
         plan["target"] = h["fmt"]
     elif act == "ocr" and h["fmt"] in {"docx", "txt", "md"}:
@@ -179,6 +186,16 @@ def ask_rules(text, files, ocr=False):
         tgt = "txt" if ("txt" in rest or "메모장" in t) else "md" if fmt == "md" else "docx"
         return {"action": "ocr", "files": src, "target": tgt}
 
+    h = hints(text, files)
+    has_img = any(Path(f).suffix.lower() in fconv.IMG_EXT for f in files)
+    has_pdf = any(f.lower().endswith(".pdf") for f in files)
+    if h["fmt"] in IMG_FMT and has_pdf and (any(f.lower().endswith(".pdf") for f in named) or re.search(r"pdf|피디에프", t) or not has_img):
+        pdfs = [f for f in named if f.lower().endswith(".pdf")] or [f for f in files if f.lower().endswith(".pdf")][:1]
+        return {"action": "split", "files": pdfs, "format": "png" if h["fmt"] == "png" else "jpg"}
+    if h["fmt"] in IMG_FMT and has_img and not any(k in t for k in ["묶", "합쳐", "합치", "모아", "하나로"]):
+        imgs = [f for f in named if Path(f).suffix.lower() in fconv.IMG_EXT]
+        return {"action": "imgconv", "files": imgs or IMG_GLOBS, "target": h["fmt"]}
+
     if any(k in t for k in ["쪼개", "나눠", "분리", "이미지로", "사진으로"]) and \
             any(f.lower().endswith(".pdf") for f in files):
         pdfs = named or [f for f in files if f.lower().endswith(".pdf")][:1]
@@ -195,7 +212,7 @@ def ask_rules(text, files, ocr=False):
 
     if named and fmt:
         return {"action": "convert", "files": named, "target": fmt}
-    return {"action": "unknown", "reason": "파일 이름이나 원하는 형식을 같이 말해줘"}
+    return {"action": "unknown", "reason": "파일 이름이나 원하는 형식을 같이 말해주세요"}
 
 
 # ───────── 계획 검사 (AI가 이상한 거 못 하게) ─────────
@@ -209,7 +226,7 @@ def resolve(patterns, files):
 
 def check(plan, files, allow_ocr=False):
     act = plan.get("action")
-    if act not in {"bundle", "convert", "split"} | ({"ocr"} if allow_ocr else set()):
+    if act not in {"bundle", "convert", "split", "imgconv"} | ({"ocr"} if allow_ocr else set()):
         raise ValueError(plan.get("reason", "처리할 수 없는 요청"))
     real = resolve(plan.get("files") or [], files)
     if not real:
@@ -221,6 +238,15 @@ def check(plan, files, allow_ocr=False):
         plan["files"] = [f for f in real if Path(f).suffix.lower().lstrip(".") != tgt]
         if not plan["files"]:
             raise ValueError("이미 그 형식이야")
+    if act == "imgconv":
+        tgt = {"jpeg": "jpg"}.get(str(plan.get("target", "")).lower().lstrip("."), str(plan.get("target", "")).lower().lstrip("."))
+        if tgt not in IMG_FMT:
+            raise ValueError("사진은 JPG·PNG·WEBP로 바꿀 수 있어요")
+        plan["target"] = tgt
+        plan["files"] = [f for f in real if Path(f).suffix.lower() in fconv.IMG_EXT
+                         and Path(f).suffix.lower().lstrip(".").replace("jpeg", "jpg") != tgt]
+        if not plan["files"]:
+            raise ValueError(f"이미 전부 {tgt.upper()}예요")
     if act == "ocr":
         plan["files"] = [f for f in real if Path(f).suffix.lower() in fconv.IMG_EXT | {".pdf"}]
         tgt = str(plan.get("target") or "docx").lower().lstrip(".")
@@ -237,20 +263,26 @@ def check(plan, files, allow_ocr=False):
             raise ValueError("묶을 이미지가 없음")
     return plan
 
+DOC_NAME = {"docx": "Word 문서", "pdf": "PDF", "md": "마크다운", "html": "웹페이지", "txt": "텍스트",
+            "odt": "ODT 문서", "epub": "전자책(EPUB)"}
+
 def describe(p):
     n = len(p["files"])
     head = ", ".join(p["files"][:3]) + (f" 외 {n-3}개" if n > 3 else "")
     if p["action"] == "bundle":
         extra = []
         if p.get("sort") == "time": extra.append("찍은 시간순")
-        if p.get("per_page", 1) > 1: extra.append(f"페이지당 {p['per_page']}장")
-        if p.get("quality", 80) < 80: extra.append("용량 줄이기")
-        return f"이미지 {n}장({head}) → {p['out']}" + (f"  [{', '.join(extra)}]" if extra else "")
+        if int(p.get("per_page", 1)) > 1: extra.append(f"한 쪽에 {p['per_page']}장")
+        if int(p.get("quality", 80)) < 80: extra.append("용량 작게")
+        if int(p.get("quality", 80)) > 90: extra.append("원본 화질")
+        return f"사진 {n}장 ({head})\n→ {p['out']} 한 파일로 합치기" + (f"\n[{', '.join(extra)}]" if extra else "")
     if p["action"] == "convert":
-        return f"{head} → {p['target']} 변환"
+        return f"문서 {n}개 ({head})\n→ {DOC_NAME.get(p['target'], p['target'])}로 바꾸기"
+    if p["action"] == "imgconv":
+        return f"사진 {n}장 ({head})\n→ {p['target'].upper()}로 바꾸기"
     if p["action"] == "ocr":
-        return f"{head} → 글자 뽑아서 {p['target']} 문서로 (온라인)"
-    return f"{head} → 페이지별 {p.get('format','jpg')} 이미지"
+        return f"{head}\n→ 글자를 뽑아서 {DOC_NAME.get(p['target'], p['target'])}로 (AI로 전송)"
+    return f"{head}\n→ 페이지별 사진 (폴더)"
 
 
 # ───────── 실행 ─────────
@@ -261,6 +293,9 @@ def run(p):
     elif p["action"] == "convert":
         for f in p["files"]:
             fconv.convert(f, p["target"])
+    elif p["action"] == "imgconv":
+        for f in p["files"]:
+            fconv.convert_image(f, p["target"])
     elif p["action"] == "split":
         for f in p["files"]:
             fconv.split(f, p.get("format", "jpg"))

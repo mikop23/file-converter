@@ -196,7 +196,9 @@ def convert(src, target, out=None):
             if not made.exists():
                 sys.exit("LibreOffice 변환 실패")
             shutil.move(str(made), str(out))
-    elif "." + s in IMG_EXT and target in {"pdf", "jpg", "jpeg", "png", "webp"}:
+    elif "." + s in IMG_EXT and target in {"jpg", "jpeg", "png", "webp"}:
+        return convert_image(src, target, out)
+    elif "." + s in IMG_EXT and target == "pdf":
         return bundle([src], out, quiet=True)
     elif s in PANDOC_FMT and target == "pdf":
         # md/html/txt → pdf : pandoc으로 docx 만든 뒤 LibreOffice로 pdf (LaTeX 설치 불필요)
@@ -215,6 +217,29 @@ def convert(src, target, out=None):
             sys.exit("pandoc 오류: " + r.stderr.strip()[:200])
     else:
         sys.exit(f"{s} → {target} 변환은 아직 지원 안 함")
+    print(f"완료: {out}")
+    return out
+
+
+# ───────── ①-2 사진 형식 바꾸기 (크기·화질 그대로) ─────────
+def convert_image(src, target, out=None):
+    src = Path(src)
+    target = {"jpeg": "jpg"}.get(target.lower().lstrip("."), target.lower().lstrip("."))
+    if target not in {"jpg", "png", "webp"}:
+        sys.exit(f"사진은 JPG·PNG·WEBP로 바꿀 수 있어요 ({target} 안 됨)")
+    out = unique_path(out or src.with_suffix("." + target))
+    if src.suffix.lower() == ".heic":
+        load_image(src, 0)                                 # HEIC 열기 준비 (pillow-heif)
+    im = ImageOps.exif_transpose(Image.open(src))          # 회전 보정
+    if target == "jpg":
+        if im.mode in ("RGBA", "LA", "P"):                 # 투명 배경은 흰색으로
+            bg = Image.new("RGB", im.size, "white")
+            im = im.convert("RGBA"); bg.paste(im, mask=im.split()[-1]); im = bg
+        im.convert("RGB").save(out, "JPEG", quality=92, optimize=True)
+    elif target == "png":
+        im.save(out, "PNG", optimize=True)
+    else:
+        im.save(out, "WEBP", quality=92)
     print(f"완료: {out}")
     return out
 
