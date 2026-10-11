@@ -81,7 +81,7 @@ jobs:
         run: |
           @{ edition = "${{ matrix.edition }}"; relay_url = "$env:RELAY_URL" } | ConvertTo-Json | Set-Content -Encoding utf8 edition.json
           Get-Content edition.json
-          if ("${{ matrix.edition }}" -eq "online" -and !$env:RELAY_URL) { Write-Host "::warning::RELAY_URL 변수가 없어요. 온라인 버전은 프로그램 안 '서버' 버튼으로 주소를 넣어야 해요." }
+          if ("${{ matrix.edition }}" -eq "online" -and !$env:RELAY_URL) { Write-Host "::warning::RELAY_URL 변수가 없어요. 온라인 버전은 프로그램의 ⚙ 설정에서 AI 연결 주소를 넣어야 해요." }
 
       - name: exe 만들기
         shell: pwsh

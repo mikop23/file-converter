@@ -37,7 +37,7 @@ npx wrangler deploy                          # 끝나면 https://file-converter-
 
 ### 3. 서버 주소 연결
 저장소 **Settings → Secrets and variables → Actions → Variables**에 `RELAY_URL` = 위 주소 추가 → 다음 빌드부터 온라인 앱·사이트에 자동으로 들어감.
-(앱은 오른쪽 위 **서버** 버튼, 사이트는 **AI 서버** 버튼으로 직접 넣어도 됨)
+(앱·사이트 모두 오른쪽 위 **⚙ 설정**에서 직접 넣어도 됨)
 
 ## 비용·안전
 - 중계 서버는 `/plan`(말 알아듣기)과 `/ocr`(글자 추출)만 허용 → API 키로 아무 대화나 못 시킴
