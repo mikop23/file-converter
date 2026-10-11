@@ -8,6 +8,7 @@ const $ = (s) => document.querySelector(s);
 const QUALITY = { normal: [0.8, 2000], small: [0.6, 1500], hq: [0.95, 0] };
 const state = { files: [], busy: false, aiOnline: false, nextId: 1 };
 const TOUCH = matchMedia("(pointer: coarse)").matches;                // 폰·태블릿 (끌어서 순서 바꾸기 안 됨)
+document.documentElement.classList.toggle("touch", TOUCH);
 
 // ───────── 저장소 (실패해도 동작) ─────────
 const store = {
@@ -76,7 +77,19 @@ function render() {
     rm.setAttribute("aria-label", f.name + " 빼기");
     rm.onclick = () => { state.files = state.files.filter((x) => x !== f); render(); };
     li.append(Object.assign(document.createElement("span"), { className: "idx", textContent: i + 1 }), thumb, name,
-              Object.assign(document.createElement("span"), { className: "fsize", textContent: fmtSize(f.file.size) }), rot, rm);
+              Object.assign(document.createElement("span"), { className: "fsize", textContent: fmtSize(f.file.size) }));
+    if (TOUCH) {                                                           // 폰: ▲▼로 순서 바꾸기
+      const mv = Object.assign(document.createElement("span"), { className: "mv" });
+      for (const [txt, d, lbl] of [["▲", -1, "위로"], ["▼", 1, "아래로"]]) {
+        const b = Object.assign(document.createElement("button"), { type: "button", textContent: txt });
+        b.setAttribute("aria-label", `${f.name} ${lbl}`);
+        b.disabled = (d < 0 && i === 0) || (d > 0 && i === state.files.length - 1);
+        b.onclick = () => { const j = i + d; [state.files[i], state.files[j]] = [state.files[j], state.files[i]]; render(); };
+        mv.append(b);
+      }
+      li.append(mv);
+    }
+    li.append(rot, rm);
     return li;
   }));
   $("#drop").classList.toggle("has", state.files.length > 0);
@@ -100,7 +113,7 @@ function refresh() {
   document.querySelectorAll("[data-why]").forEach((w) => { w.hidden = has[w.dataset.why]; w.closest(".card").classList.toggle("off", !has[w.dataset.why]); });
   $("#imgConvTip").hidden = n("image") < 4;
   $("#trayTip").hidden = state.files.length < 2 && !has.image;
-  $("#trayTip").textContent = (TOUCH ? "순서는 '사진 한 파일로 합치기'의 순서 옵션(파일 이름순·찍은 시간순)으로 정할 수 있어요."
+  $("#trayTip").textContent = (TOUCH ? "▲▼로 순서를 바꿀 수 있어요. 사진을 합칠 때 이 순서대로 들어가요."
                                      : "줄을 끌어서 순서를 바꿀 수 있어요.") + " 누운 사진은 ⟳를 눌러 돌리세요. 만드는 파일에 그대로 들어가요.";
   $("#ocrSec").classList.toggle("off", !ocrReady);
   $("#ocrNote").textContent = !relayUrl() ? "⚙ 설정에서 AI를 연결하면 쓸 수 있어요."
